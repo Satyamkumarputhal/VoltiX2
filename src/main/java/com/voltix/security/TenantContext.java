@@ -8,7 +8,7 @@ public class TenantContext {
     private static final ThreadLocal<Long> currentTenant = new ThreadLocal<>();
 
     public static void setCurrentTenant(Long tenantId) {
-        log.debug("Setting tenant context: {}", tenantId);
+        log.info("Setting tenant context: {}", tenantId);
         currentTenant.set(tenantId);
     }
 
@@ -17,7 +17,7 @@ public class TenantContext {
     }
 
     public static void clear() {
-        log.debug("Clearing tenant context");
+        log.info("Clearing tenant context");
         currentTenant.remove();
     }
 }

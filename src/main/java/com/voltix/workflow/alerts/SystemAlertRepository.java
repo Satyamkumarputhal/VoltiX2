@@ -7,6 +7,6 @@ import java.util.List;
 
 @Repository
 public interface SystemAlertRepository extends JpaRepository<SystemAlert, Long> {
-    List<SystemAlert> findByStatus(AlertStatus status);
+    List<SystemAlert> findByStatusAndTenantId(AlertStatus status, Long tenantId);
     List<SystemAlert> findByTenantIdAndStatus(Long tenantId, AlertStatus status);
 }

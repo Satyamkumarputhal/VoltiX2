@@ -15,6 +15,7 @@ public interface TelemetryStagingRepository extends JpaRepository<TelemetryStagi
             update TelemetryStaging staging
                set staging.failureReason = :failureReason
              where staging.stagingId = :stagingId
+               and staging.tenantId = :tenantId
             """)
-    void markFailed(Long stagingId, String failureReason);
+    void markFailed(Long stagingId, Long tenantId, String failureReason);
 }

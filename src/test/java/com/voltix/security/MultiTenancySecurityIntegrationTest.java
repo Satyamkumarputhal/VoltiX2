@@ -97,4 +97,39 @@ class MultiTenancySecurityIntegrationTest {
             TenantContext.clear();
         }
     }
+
+    @Test
+    void whenQueryingDeduplicationAndListByStatus_thenOnlyReturnSameTenantData() {
+        // Querying for Tenant 1 context
+        TenantContext.setCurrentTenant(1L);
+        try {
+            // Deduplication query: should find complaint for address hash "hash1" since it belongs to Tenant 1
+            Optional<PublicComplaint> complaintT1 = complaintRepository
+                    .findFirstByAddressHashAndStatusAndSubmittedAtAfterAndTenantId(
+                            "hash1",
+                            ComplaintStatus.PENDING_VERIFICATION,
+                            ZonedDateTime.now().minusHours(1),
+                            1L
+                    );
+            assertEquals(true, complaintT1.isPresent());
+
+            // Deduplication query: should NOT find complaint for address hash "hash2" since it belongs to Tenant 2
+            Optional<PublicComplaint> complaintT2 = complaintRepository
+                    .findFirstByAddressHashAndStatusAndSubmittedAtAfterAndTenantId(
+                            "hash2",
+                            ComplaintStatus.PENDING_VERIFICATION,
+                            ZonedDateTime.now().minusHours(1),
+                            1L
+                    );
+            assertEquals(false, complaintT2.isPresent());
+
+            // List by status query: should only return Tenant 1's complaint
+            java.util.List<PublicComplaint> list = complaintRepository
+                    .findByStatusAndTenantIdOrderBySubmittedAtDesc(ComplaintStatus.PENDING_VERIFICATION, 1L);
+            assertEquals(1, list.size());
+            assertEquals("123 Street T1", list.get(0).getIncidentAddress());
+        } finally {
+            TenantContext.clear();
+        }
+    }
 }
