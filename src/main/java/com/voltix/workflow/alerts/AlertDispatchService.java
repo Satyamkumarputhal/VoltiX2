@@ -58,18 +58,22 @@ public class AlertDispatchService {
         return saved;
     }
 
+    private final java.util.Map<Long, BigDecimal> riskMultiplierCache = new java.util.concurrent.ConcurrentHashMap<>();
+
     private BigDecimal getRiskMultiplier(Long zoneId) {
-        try {
-            Double multiplier = jdbcTemplate.queryForObject(
-                    "SELECT risk_multiplier FROM grid_zones WHERE zone_id = ?",
-                    Double.class,
-                    zoneId
-            );
-            return multiplier != null ? BigDecimal.valueOf(multiplier) : BigDecimal.ONE;
-        } catch (Exception e) {
-            log.debug("No risk multiplier found for zoneId={}. Defaulting to 1.00", zoneId);
-            return BigDecimal.ONE;
-        }
+        return riskMultiplierCache.computeIfAbsent(zoneId, id -> {
+            try {
+                Double multiplier = jdbcTemplate.queryForObject(
+                        "SELECT risk_multiplier FROM grid_zones WHERE zone_id = ?",
+                        Double.class,
+                        id
+                );
+                return multiplier != null ? BigDecimal.valueOf(multiplier) : BigDecimal.ONE;
+            } catch (Exception e) {
+                log.debug("No risk multiplier found for zoneId={}. Defaulting to 1.00", id);
+                return BigDecimal.ONE;
+            }
+        });
     }
 
     private AlertSeverity determineSeverity(BigDecimal priorityScore) {

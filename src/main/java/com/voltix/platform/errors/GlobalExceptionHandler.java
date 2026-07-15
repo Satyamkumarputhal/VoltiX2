@@ -13,6 +13,8 @@ import java.util.concurrent.RejectedExecutionException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()
@@ -27,13 +29,15 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
-    @ExceptionHandler(DataAccessException.class)
-    ResponseEntity<ApiError> handleDataAccess(DataAccessException ex) {
+    @ExceptionHandler({DataAccessException.class, org.springframework.transaction.TransactionException.class})
+    ResponseEntity<ApiError> handleDataAccess(Exception ex) {
+        log.error("Database or transaction exception occurred during ingestion: {}", ex.getMessage());
         return error(HttpStatus.SERVICE_UNAVAILABLE, "Telemetry durability store is unavailable");
     }
 
     @ExceptionHandler(RejectedExecutionException.class)
     ResponseEntity<ApiError> handleRejected(RejectedExecutionException ex) {
+        log.warn("Ingestion task rejected: {}", ex.getMessage());
         return error(HttpStatus.TOO_MANY_REQUESTS, "VoltiX ingestion capacity is saturated");
     }
 

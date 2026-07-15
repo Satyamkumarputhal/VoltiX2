@@ -41,3 +41,4 @@ build/
 dataset/
 voltix-app.log
 voltix-app.err.log
+gc.log*
