@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  voltix-db:
+    image: postgres:16-alpine
+    container_name: voltix-postgres-db
+    environment:
+      POSTGRES_USER: voltix_admin
+      POSTGRES_PASSWORD: voltix_secure_pass
+      POSTGRES_DB: voltix_grid
+    ports:
+      - "5433:5432"
+    volumes:
+      - voltix_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voltix_admin -d voltix_grid"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  voltix_postgres_data:

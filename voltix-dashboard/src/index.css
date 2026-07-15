@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* ── VoltiX Design Token Theme (Tailwind v4 CSS-based config) ─────────── */
+@theme {
+  /* Colors */
+  --color-grid-base:    #0d1117;
+  --color-grid-surface: #161b22;
+  --color-grid-raised:  #1c2128;
+  --color-grid-border:  #30363d;
+  --color-grid-muted:   #8b949e;
+
+  --color-accent-green:  #39d353;
+  --color-accent-blue:   #388bfd;
+  --color-accent-amber:  #f0a500;
+  --color-accent-orange: #e05c00;
+  --color-accent-red:    #cf222e;
+
+  /* Typography */
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Custom animations */
+  --animate-slide-in: slideIn 0.2s ease-out;
+  --animate-fade-in:  fadeIn 0.3s ease-out;
+
+  /* Keyframes */
+  @keyframes slideIn {
+    0%   { transform: translateY(-4px); opacity: 0; }
+    100% { transform: translateY(0);    opacity: 1; }
+  }
+  @keyframes fadeIn {
+    0%   { opacity: 0; }
+    100% { opacity: 1; }
+  }
+}
+
+/* ── VoltiX Dark Baseline ─────────────────────────────────── */
+:root {
+  --grid-base:    #0d1117;
+  --grid-surface: #161b22;
+  --grid-raised:  #1c2128;
+  --grid-border:  #30363d;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--grid-base);
+  color: #e6edf3;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--grid-surface); }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+/* Severity badge base */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* STOMP connection pulse */
+@keyframes ws-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.ws-connecting { animation: ws-pulse 1.2s ease-in-out infinite; }
