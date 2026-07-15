@@ -225,4 +225,31 @@ class PublicComplaintControllerTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].incidentAddress").value("456 Street T2"));
     }
+
+    @Test
+    @org.springframework.security.test.context.support.WithMockUser(username = "operator", roles = "OPERATOR")
+    void whenOperatorTriageForeignComplaint_thenReturn403Forbidden() throws Exception {
+        // Seed Tenant 2 and its complaint
+        jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (2, 'Tenant 2', 'ACTIVE')");
+        jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (2, 2, 'Zone B', 1.0)");
+
+        PublicComplaint c2 = new PublicComplaint();
+        c2.setTenantId(2L);
+        c2.setZoneId(2L);
+        c2.setIncidentAddress("456 Street T2");
+        c2.setAddressHash("hashT2");
+        c2.setDescription("T2 Complaint");
+        c2.setSubmitterIpHash("ip2");
+        c2.setStatus(ComplaintStatus.PENDING_VERIFICATION);
+        c2.setSubmittedAt(ZonedDateTime.now());
+        c2 = complaintRepository.saveAndFlush(c2);
+
+        // Operator of Tenant 1 tries to triage Tenant 2's complaint
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/complaints/" + c2.getComplaintId() + "/triage")
+                        .header("Authorization", "Bearer eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAib3BlcmF0b3ItMSIsICJ0ZW5hbnRfaWQiOiAxLCAicm9sZXMiOiBbIk9QRVJBVE9SIl0sICJleHAiOiAxODgyNzI4MDAwfQ.c2lnbmF0dXJl")
+                        .param("status", "VERIFIED")
+                        .with(request -> { request.setRemoteAddr("10.0.0.12"); return request; }))
+                .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
+                .andExpect(status().isForbidden());
+    }
 }
