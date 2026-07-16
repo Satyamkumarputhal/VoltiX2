@@ -49,12 +49,23 @@ class PublicComplaintControllerTest {
 
         jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (1, 'Test Tenant', 'ACTIVE')");
         jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (1, 1, 'Zone A', 1.0)");
+        jdbcTemplate.execute("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (1, 'operator', '$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq', 'OPERATOR')");
 
         complaintRequest = new ComplaintRequest();
         complaintRequest.setZoneId(1L);
         complaintRequest.setIncidentAddress("123 Power Grid Lane");
         complaintRequest.setDescription("Wire tapping anomaly observed on transformer node.");
         complaintRequest.setTenantId(1L);
+    }
+
+    private String loginAndGetToken(String username, String password) throws Exception {
+        String content = "{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}";
+        String response = mockMvc.perform(post("/api/v1/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(content))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(response).get("token").asText();
     }
 
     @Test
@@ -196,6 +207,7 @@ class PublicComplaintControllerTest {
         // Seed Tenant 2 and its complaint
         jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (2, 'Tenant 2', 'ACTIVE')");
         jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (2, 2, 'Zone B', 1.0)");
+        jdbcTemplate.execute("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (2, 'operator2', '$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq', 'OPERATOR')");
 
         PublicComplaint c2 = new PublicComplaint();
         c2.setTenantId(2L);
@@ -208,9 +220,12 @@ class PublicComplaintControllerTest {
         c2.setSubmittedAt(ZonedDateTime.now());
         complaintRepository.saveAndFlush(c2);
 
+        String token1 = loginAndGetToken("operator", "password");
+        String token2 = loginAndGetToken("operator2", "password");
+
         // Operator of Tenant 1 fetches data
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/complaints")
-                        .header("Authorization", "Bearer eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAib3BlcmF0b3ItMSIsICJ0ZW5hbnRfaWQiOiAxLCAicm9sZXMiOiBbIk9QRVJBVE9SIl0sICJleHAiOiAxODgyNzI4MDAwfQ.c2lnbmF0dXJl")
+                        .header("Authorization", "Bearer " + token1)
                         .with(request -> { request.setRemoteAddr("10.0.0.12"); return request; }))
                 .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
                 .andExpect(status().isOk())
@@ -219,7 +234,7 @@ class PublicComplaintControllerTest {
 
         // Operator of Tenant 2 fetches data
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/complaints")
-                        .header("Authorization", "Bearer eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAib3BlcmF0b3ItMiIsICJ0ZW5hbnRfaWQiOiAyLCAicm9sZXMiOiBbIk9QRVJBVE9SIl0sICJleHAiOiAxODgyNzI4MDAwfQ.c2lnbmF0dXJl")
+                        .header("Authorization", "Bearer " + token2)
                         .with(request -> { request.setRemoteAddr("10.0.0.12"); return request; }))
                 .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
                 .andExpect(status().isOk())
@@ -245,9 +260,11 @@ class PublicComplaintControllerTest {
         c2.setSubmittedAt(ZonedDateTime.now());
         c2 = complaintRepository.saveAndFlush(c2);
 
+        String token1 = loginAndGetToken("operator", "password");
+
         // Operator of Tenant 1 tries to triage Tenant 2's complaint
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/complaints/" + c2.getComplaintId() + "/triage")
-                        .header("Authorization", "Bearer eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAib3BlcmF0b3ItMSIsICJ0ZW5hbnRfaWQiOiAxLCAicm9sZXMiOiBbIk9QRVJBVE9SIl0sICJleHAiOiAxODgyNzI4MDAwfQ.c2lnbmF0dXJl")
+                        .header("Authorization", "Bearer " + token1)
                         .param("status", "VERIFIED")
                         .with(request -> { request.setRemoteAddr("10.0.0.12"); return request; }))
                 .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
