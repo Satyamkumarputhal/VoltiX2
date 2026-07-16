@@ -72,8 +72,27 @@ public class ZoneLoadForecaster {
             float hourVal = (float) targetTime.getHour();
             float dayVal = (float) (targetTime.getDayOfWeek().getValue() - 1); // 0-6 index mapping
 
+            Double lag1 = jdbcTemplate.query("""
+                SELECT total_kw_consumed
+                  FROM zone_hourly_aggregates
+                 WHERE tenant_id = ? AND zone_id = ?
+                   AND aggregated_hour = ?
+                """, rs -> rs.next() ? rs.getDouble(1) : null,
+                tenantId, zoneId, targetTime.minusHours(1).truncatedTo(java.time.temporal.ChronoUnit.HOURS));
+
+            Double lag2 = jdbcTemplate.query("""
+                SELECT total_kw_consumed
+                  FROM zone_hourly_aggregates
+                 WHERE tenant_id = ? AND zone_id = ?
+                   AND aggregated_hour = ?
+                """, rs -> rs.next() ? rs.getDouble(1) : null,
+                tenantId, zoneId, targetTime.minusHours(2).truncatedTo(java.time.temporal.ChronoUnit.HOURS));
+
+            float lag1Val = lag1 != null ? lag1.floatValue() : 0.0f;
+            float lag2Val = lag2 != null ? lag2.floatValue() : 0.0f;
+
             String inputName = session.getInputNames().iterator().next();
-            float[][] features = new float[][]{{ hourVal, dayVal, tempVal }};
+            float[][] features = new float[][]{{ hourVal, dayVal, tempVal, lag1Val, lag2Val }};
 
             try (OnnxTensor tensor = OnnxTensor.createTensor(environment, features);
                  OrtSession.Result result = session.run(Map.of(inputName, tensor))) {
