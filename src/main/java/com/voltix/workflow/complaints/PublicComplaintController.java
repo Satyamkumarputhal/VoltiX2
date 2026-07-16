@@ -17,6 +17,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.voltix.security.TenantContext;
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import java.util.List;
 
 import java.nio.charset.StandardCharsets;
@@ -34,11 +37,13 @@ public class PublicComplaintController {
 
     private final PublicComplaintRepository complaintRepository;
     private final VoltixProperties properties;
+    private final JdbcTemplate jdbcTemplate;
     private final Map<String, io.github.bucket4j.Bucket> rateLimitCache = new ConcurrentHashMap<>();
 
-    public PublicComplaintController(PublicComplaintRepository complaintRepository, VoltixProperties properties) {
+    public PublicComplaintController(PublicComplaintRepository complaintRepository, VoltixProperties properties, JdbcTemplate jdbcTemplate) {
         this.complaintRepository = complaintRepository;
         this.properties = properties;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @PostMapping("/anonymous")
@@ -55,16 +60,45 @@ public class PublicComplaintController {
                     .body(Map.of(
                             "status", "RATE_LIMITED",
                             "message", "Rate limit exceeded. Please try again later."
-                    ));
+                     ));
         }
 
         String addressHash = computeSha256(request.getIncidentAddress());
         long windowMinutes = properties.getComplaints().getDedupWindowMinutes();
         ZonedDateTime since = ZonedDateTime.now().minusMinutes(windowMinutes);
 
+        // Safe Zone-to-Tenant ID Lookup
+        Long tenantId;
+        try {
+            tenantId = jdbcTemplate.queryForObject(
+                    "SELECT tenant_id FROM grid_zones WHERE zone_id = ?",
+                    Long.class,
+                    request.getZoneId()
+            );
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            log.warn("No zone found with zoneId={}", request.getZoneId());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of(
+                            "status", "INVALID_ZONE",
+                            "message", "The specified zone ID does not exist."
+                    ));
+        } catch (Exception e) {
+            log.error("Error looking up tenant for zoneId={}: {}", request.getZoneId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of(
+                            "status", "ERROR",
+                            "message", "An unexpected error occurred while processing the request."
+                    ));
+        }
+
         // Deduplication Check
         Optional<PublicComplaint> existing = complaintRepository
-                .findFirstByAddressHashAndStatusAndSubmittedAtAfter(addressHash, ComplaintStatus.PENDING_VERIFICATION, since);
+                .findFirstByAddressHashAndStatusAndSubmittedAtAfterAndTenantId(
+                        addressHash,
+                        ComplaintStatus.PENDING_VERIFICATION,
+                        since,
+                        tenantId
+                );
 
         if (existing.isPresent()) {
             log.info("Deduplicated complaint for address hash: {}", addressHash);
@@ -77,7 +111,6 @@ public class PublicComplaintController {
 
         // Save new anonymous complaint
         PublicComplaint complaint = new PublicComplaint();
-        long tenantId = request.getTenantId() != null ? request.getTenantId() : properties.getTenant().getDefaultId();
         complaint.setTenantId(tenantId);
         complaint.setZoneId(request.getZoneId());
         complaint.setIncidentAddress(request.getIncidentAddress());
@@ -109,10 +142,13 @@ public class PublicComplaintController {
     public ResponseEntity<List<PublicComplaint>> listComplaints(
             @RequestParam(defaultValue = "PENDING_VERIFICATION") ComplaintStatus status
     ) {
-        List<PublicComplaint> complaints = complaintRepository.findByStatusOrderBySubmittedAtDesc(status);
+        Long tenantId = TenantContext.getCurrentTenant();
+        log.info("listComplaints: status={}, tenantId={}", status, tenantId);
+        List<PublicComplaint> complaints = complaintRepository.findByStatusAndTenantIdOrderBySubmittedAtDesc(status, tenantId);
         return ResponseEntity.ok(complaints);
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
     @PatchMapping("/{complaintId}/triage")
     public ResponseEntity<Map<String, String>> triageComplaint(
             @PathVariable Long complaintId,

@@ -22,15 +22,29 @@ class AnomalyDetectionEngineTest {
     void setUp() {
         packet = new TelemetryPacket();
         packet.setMeterId("SM-99");
-        packet.setVoltage(230.0);
-        packet.setCurrent(10.0);
-        packet.setKwConsumed(2.3); // P = V * I / 1000 = 230 * 10 / 1000 = 2.3kW
+        packet.setVoltage(240.0);
+        packet.setCurrent(6.0);
+        packet.setKwConsumed(1.5); // 1.5kW
     }
 
     @Test
     void whenTelemetryIsNormal_thenReturnNotAnomalous() {
         AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
         assertFalse(result.anomalous());
+        assertEquals("ONNX", result.source());
+        assertEquals(1.0, result.score(), 0.01);
+    }
+
+    @Test
+    void whenTelemetryIsBorderlineHighLoad_thenReturnAnomalous() {
+        // Documenting model behavior change: at contamination=0.05, this previously normal 
+        // borderline-high load (2.3kW) is now flagged as an anomaly.
+        packet.setVoltage(230.0);
+        packet.setCurrent(10.0);
+        packet.setKwConsumed(2.3); 
+
+        AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
+        assertTrue(result.anomalous());
         assertEquals("ONNX", result.source());
         assertEquals(1.0, result.score(), 0.01);
     }

@@ -16,17 +16,19 @@ public interface PublicComplaintRepository extends JpaRepository<PublicComplaint
             WHERE c.addressHash = :addressHash
               AND c.status = :status
               AND c.submittedAt >= :since
+              AND c.tenantId = :tenantId
            """)
-    Optional<PublicComplaint> findFirstByAddressHashAndStatusAndSubmittedAtAfter(
+    Optional<PublicComplaint> findFirstByAddressHashAndStatusAndSubmittedAtAfterAndTenantId(
             String addressHash,
             ComplaintStatus status,
-            ZonedDateTime since
+            ZonedDateTime since,
+            Long tenantId
     );
 
     /**
      * Used by the operator triage panel to list complaints by status,
      * newest first. Spring Data JPA derives this query from the method name.
      */
-    List<PublicComplaint> findByStatusOrderBySubmittedAtDesc(ComplaintStatus status);
+    List<PublicComplaint> findByStatusAndTenantIdOrderBySubmittedAtDesc(ComplaintStatus status, Long tenantId);
 }
 

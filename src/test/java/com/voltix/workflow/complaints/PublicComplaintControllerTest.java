@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
+import java.time.ZonedDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -43,10 +44,12 @@ class PublicComplaintControllerTest {
         jdbcTemplate.execute("DELETE FROM telemetry_staging");
         jdbcTemplate.execute("DELETE FROM smart_meters");
         jdbcTemplate.execute("DELETE FROM grid_zones");
+        jdbcTemplate.execute("DELETE FROM users");
         jdbcTemplate.execute("DELETE FROM tenants");
 
         jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (1, 'Test Tenant', 'ACTIVE')");
         jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (1, 1, 'Zone A', 1.0)");
+        jdbcTemplate.execute("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (1, 'operator', '$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq', 'OPERATOR')");
 
         complaintRequest = new ComplaintRequest();
         complaintRequest.setZoneId(1L);
@@ -55,12 +58,23 @@ class PublicComplaintControllerTest {
         complaintRequest.setTenantId(1L);
     }
 
+    private String loginAndGetToken(String username, String password) throws Exception {
+        String content = "{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}";
+        String response = mockMvc.perform(post("/api/v1/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(content))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(response).get("token").asText();
+    }
+
     @Test
     void whenSubmitAnonymousComplaint_thenReturn201Created() throws Exception {
         mockMvc.perform(post("/api/v1/complaints/anonymous")
                         .with(request -> { request.setRemoteAddr("10.0.0.1"); return request; })
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(complaintRequest)))
+                .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("CREATED"))
                 .andExpect(jsonPath("$.message").value("Complaint submitted successfully and is pending verification."));
@@ -138,5 +152,122 @@ class PublicComplaintControllerTest {
         PublicComplaint updated = complaintRepository.findById(complaintId).orElseThrow();
         assertEquals(ComplaintStatus.VERIFIED, updated.getStatus());
         org.junit.jupiter.api.Assertions.assertNotNull(updated.getTriagedAt());
+    }
+
+    @Test
+    void whenSubmitAnonymousComplaintWithoutTenantId_thenResolveFromZone() throws Exception {
+        // Remove tenantId from payload to force server-side resolution
+        complaintRequest.setTenantId(null);
+
+        mockMvc.perform(post("/api/v1/complaints/anonymous")
+                        .with(request -> { request.setRemoteAddr("10.0.0.9"); return request; })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(complaintRequest)))
+                .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CREATED"));
+
+        PublicComplaint saved = complaintRepository.findAll().stream()
+                .filter(c -> "123 Power Grid Lane".equals(c.getIncidentAddress()))
+                .findFirst().orElseThrow();
+        assertEquals(1L, saved.getTenantId()); // Resolved from Zone A (tenant_id = 1)
+    }
+
+    @Test
+    void whenSubmitAnonymousComplaintWithNonExistentZone_thenReturn400BadRequest() throws Exception {
+        complaintRequest.setZoneId(999L); // non-existent zone
+        complaintRequest.setTenantId(null);
+        complaintRequest.setIncidentAddress("999 Unknown St");
+
+        mockMvc.perform(post("/api/v1/complaints/anonymous")
+                        .with(request -> { request.setRemoteAddr("10.0.0.10"); return request; })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(complaintRequest)))
+                .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value("INVALID_ZONE"))
+                .andExpect(jsonPath("$.message").value("The specified zone ID does not exist."));
+    }
+
+    @Test
+    @org.springframework.security.test.context.support.WithMockUser(username = "operator", roles = "OPERATOR")
+    void whenOperatorListComplaints_thenReturnSameTenantComplaintsOnly() throws Exception {
+        // Seed Tenant 1's complaint
+        PublicComplaint c1 = new PublicComplaint();
+        c1.setTenantId(1L);
+        c1.setZoneId(1L);
+        c1.setIncidentAddress("123 Power Grid Lane");
+        c1.setAddressHash("hashT1");
+        c1.setDescription("T1 Complaint");
+        c1.setSubmitterIpHash("ip1");
+        c1.setStatus(ComplaintStatus.PENDING_VERIFICATION);
+        c1.setSubmittedAt(ZonedDateTime.now());
+        complaintRepository.saveAndFlush(c1);
+
+        // Seed Tenant 2 and its complaint
+        jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (2, 'Tenant 2', 'ACTIVE')");
+        jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (2, 2, 'Zone B', 1.0)");
+        jdbcTemplate.execute("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (2, 'operator2', '$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq', 'OPERATOR')");
+
+        PublicComplaint c2 = new PublicComplaint();
+        c2.setTenantId(2L);
+        c2.setZoneId(2L);
+        c2.setIncidentAddress("456 Street T2");
+        c2.setAddressHash("hashT2");
+        c2.setDescription("T2 Complaint");
+        c2.setSubmitterIpHash("ip2");
+        c2.setStatus(ComplaintStatus.PENDING_VERIFICATION);
+        c2.setSubmittedAt(ZonedDateTime.now());
+        complaintRepository.saveAndFlush(c2);
+
+        String token1 = loginAndGetToken("operator", "password");
+        String token2 = loginAndGetToken("operator2", "password");
+
+        // Operator of Tenant 1 fetches data
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/complaints")
+                        .header("Authorization", "Bearer " + token1)
+                        .with(request -> { request.setRemoteAddr("10.0.0.12"); return request; }))
+                .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].incidentAddress").value("123 Power Grid Lane"));
+
+        // Operator of Tenant 2 fetches data
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/complaints")
+                        .header("Authorization", "Bearer " + token2)
+                        .with(request -> { request.setRemoteAddr("10.0.0.12"); return request; }))
+                .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].incidentAddress").value("456 Street T2"));
+    }
+
+    @Test
+    @org.springframework.security.test.context.support.WithMockUser(username = "operator", roles = "OPERATOR")
+    void whenOperatorTriageForeignComplaint_thenReturn403Forbidden() throws Exception {
+        // Seed Tenant 2 and its complaint
+        jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (2, 'Tenant 2', 'ACTIVE')");
+        jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (2, 2, 'Zone B', 1.0)");
+
+        PublicComplaint c2 = new PublicComplaint();
+        c2.setTenantId(2L);
+        c2.setZoneId(2L);
+        c2.setIncidentAddress("456 Street T2");
+        c2.setAddressHash("hashT2");
+        c2.setDescription("T2 Complaint");
+        c2.setSubmitterIpHash("ip2");
+        c2.setStatus(ComplaintStatus.PENDING_VERIFICATION);
+        c2.setSubmittedAt(ZonedDateTime.now());
+        c2 = complaintRepository.saveAndFlush(c2);
+
+        String token1 = loginAndGetToken("operator", "password");
+
+        // Operator of Tenant 1 tries to triage Tenant 2's complaint
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/complaints/" + c2.getComplaintId() + "/triage")
+                        .header("Authorization", "Bearer " + token1)
+                        .param("status", "VERIFIED")
+                        .with(request -> { request.setRemoteAddr("10.0.0.12"); return request; }))
+                .andDo(org.springframework.test.web.servlet.result.MockMvcResultHandlers.print())
+                .andExpect(status().isForbidden());
     }
 }

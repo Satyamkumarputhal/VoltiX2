@@ -9,13 +9,14 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       connection-timeout: 250
-      maximum-pool-size: 100
+      maximum-pool-size: 200
 
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: validate # Database schema strictly governed by Flyway versioning
     show-sql: false
+    open-in-view: false
     properties:
       hibernate.jdbc.batch_size: 50 # Prerequisite configuration for Phase 2 batch operations
       hibernate.order_inserts: true
@@ -26,6 +27,11 @@ spring:
 
 server:
   port: 8080
+  tomcat:
+    threads:
+      max: 240
+    max-connections: 5000
+    accept-count: 1000
 
 management:
   endpoints:

@@ -16,7 +16,10 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+
 @SpringBootTest
+@AutoConfigureMockMvc
 class MultiTenancySecurityIntegrationTest {
 
     @Autowired
@@ -37,6 +40,7 @@ class MultiTenancySecurityIntegrationTest {
         jdbcTemplate.execute("DELETE FROM telemetry_staging");
         jdbcTemplate.execute("DELETE FROM smart_meters");
         jdbcTemplate.execute("DELETE FROM grid_zones");
+        jdbcTemplate.execute("DELETE FROM users");
         jdbcTemplate.execute("DELETE FROM tenants");
 
         // Seed 2 tenants
@@ -73,26 +77,75 @@ class MultiTenancySecurityIntegrationTest {
         complaintTenant2Id = c2.getComplaintId();
     }
 
-    @Test
-    void whenTenantContextMatchesEntity_thenReturnEntitySuccessfully() {
-        TenantContext.setCurrentTenant(1L);
-        try {
-            Optional<PublicComplaint> complaint = complaintRepository.findById(complaintTenant1Id);
-            assertEquals(true, complaint.isPresent());
-            assertEquals(1L, complaint.get().getTenantId());
-        } finally {
-            TenantContext.clear();
-        }
+    @Autowired
+    private org.springframework.test.web.servlet.MockMvc mockMvc;
+
+    @Autowired
+    private com.voltix.platform.config.VoltixProperties properties;
+
+    private String generateToken(String username, Long tenantId, String role) throws Exception {
+        com.nimbusds.jwt.JWTClaimsSet claimsSet = new com.nimbusds.jwt.JWTClaimsSet.Builder()
+                .subject(username)
+                .claim("tenant_id", tenantId)
+                .claim("roles", java.util.List.of(role))
+                .expirationTime(new java.util.Date(System.currentTimeMillis() + 86400000))
+                .build();
+        com.nimbusds.jwt.SignedJWT signedJWT = new com.nimbusds.jwt.SignedJWT(
+                new com.nimbusds.jose.JWSHeader(com.nimbusds.jose.JWSAlgorithm.HS256), claimsSet);
+        signedJWT.sign(new com.nimbusds.jose.crypto.MACSigner(properties.getSecurity().getJwtSecret()));
+        return signedJWT.serialize();
     }
 
     @Test
-    void whenTenantContextDiffers_thenThrowAccessDeniedException() {
+    void whenTenantContextMatchesEntity_thenReturnEntitySuccessfully() throws Exception {
+        String token = generateToken("operator1", 1L, "OPERATOR");
+        
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/complaints/" + complaintTenant1Id + "/triage")
+                .param("status", "VERIFIED")
+                .header("Authorization", "Bearer " + token))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+    }
+
+    @Test
+    void whenTenantContextDiffers_thenThrowAccessDeniedException() throws Exception {
+        String token = generateToken("operator1", 1L, "OPERATOR");
+        
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/complaints/" + complaintTenant2Id + "/triage")
+                .param("status", "VERIFIED")
+                .header("Authorization", "Bearer " + token))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+    }
+
+    @Test
+    void whenQueryingDeduplicationAndListByStatus_thenOnlyReturnSameTenantData() {
+        // Querying for Tenant 1 context
         TenantContext.setCurrentTenant(1L);
         try {
-            // Attempting to retrieve Tenant 2's complaint should trigger the Aspect and throw AccessDeniedException
-            assertThrows(AccessDeniedException.class, () -> {
-                complaintRepository.findById(complaintTenant2Id);
-            });
+            // Deduplication query: should find complaint for address hash "hash1" since it belongs to Tenant 1
+            Optional<PublicComplaint> complaintT1 = complaintRepository
+                    .findFirstByAddressHashAndStatusAndSubmittedAtAfterAndTenantId(
+                            "hash1",
+                            ComplaintStatus.PENDING_VERIFICATION,
+                            ZonedDateTime.now().minusHours(1),
+                            1L
+                    );
+            assertEquals(true, complaintT1.isPresent());
+
+            // Deduplication query: should NOT find complaint for address hash "hash2" since it belongs to Tenant 2
+            Optional<PublicComplaint> complaintT2 = complaintRepository
+                    .findFirstByAddressHashAndStatusAndSubmittedAtAfterAndTenantId(
+                            "hash2",
+                            ComplaintStatus.PENDING_VERIFICATION,
+                            ZonedDateTime.now().minusHours(1),
+                            1L
+                    );
+            assertEquals(false, complaintT2.isPresent());
+
+            // List by status query: should only return Tenant 1's complaint
+            java.util.List<PublicComplaint> list = complaintRepository
+                    .findByStatusAndTenantIdOrderBySubmittedAtDesc(ComplaintStatus.PENDING_VERIFICATION, 1L);
+            assertEquals(1, list.size());
+            assertEquals("123 Street T1", list.get(0).getIncidentAddress());
         } finally {
             TenantContext.clear();
         }

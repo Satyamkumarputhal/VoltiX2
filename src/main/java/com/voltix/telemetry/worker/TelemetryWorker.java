@@ -55,7 +55,7 @@ public class TelemetryWorker {
             log.info("[{}] [{}] [{}] Telemetry evaluated via {} with score {}",
                     transactionId, packet.getMeterId(), zoneId, result.source(), result.score());
         } catch (RuntimeException ex) {
-            stagingRepository.markFailed(stagingId, ex.getMessage());
+            stagingRepository.markFailed(stagingId, tenantId, ex.getMessage());
             log.error("[{}] [{}] [{}] Telemetry processing failed for staging {}",
                     transactionId, packet.getMeterId(), zoneId, stagingId, ex);
         } finally {
