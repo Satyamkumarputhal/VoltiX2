@@ -36,6 +36,7 @@ class LoadForecastSchedulerIntegrationTest {
         jdbcTemplate.execute("DELETE FROM telemetry_staging");
         jdbcTemplate.execute("DELETE FROM smart_meters");
         jdbcTemplate.execute("DELETE FROM grid_zones");
+        jdbcTemplate.execute("DELETE FROM users");
         jdbcTemplate.execute("DELETE FROM tenants");
 
         jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (1, 'Test Tenant', 'ACTIVE')");

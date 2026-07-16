@@ -35,6 +35,7 @@ class PersistenceIntegrationTest {
         jdbcTemplate.execute("DELETE FROM telemetry_staging");
         jdbcTemplate.execute("DELETE FROM smart_meters");
         jdbcTemplate.execute("DELETE FROM grid_zones");
+        jdbcTemplate.execute("DELETE FROM users");
         jdbcTemplate.execute("DELETE FROM tenants");
 
         // Seed references

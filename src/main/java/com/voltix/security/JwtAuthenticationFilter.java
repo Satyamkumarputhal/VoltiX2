@@ -16,6 +16,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    private final com.voltix.platform.config.VoltixProperties properties;
+
+    public JwtAuthenticationFilter(com.voltix.platform.config.VoltixProperties properties) {
+        this.properties = properties;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -25,6 +30,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = authHeader.substring(7);
             try {
                 SignedJWT signedJWT = SignedJWT.parse(token);
+                com.nimbusds.jose.JWSVerifier verifier = new com.nimbusds.jose.crypto.MACVerifier(properties.getSecurity().getJwtSecret());
+                if (!signedJWT.verify(verifier)) {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    return;
+                }
+                
                 JWTClaimsSet claims = signedJWT.getJWTClaimsSet();
 
                 // Extract tenant_id
@@ -48,7 +59,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(auth);
 
             } catch (Exception e) {
-                logger.debug("Failed to parse JWT token", e);
+                logger.debug("Failed to parse or verify JWT token", e);
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                return;
             }
         }
 

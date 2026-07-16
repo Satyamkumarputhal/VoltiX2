@@ -148,6 +148,7 @@ public class PublicComplaintController {
         return ResponseEntity.ok(complaints);
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('OPERATOR', 'ADMIN')")
     @PatchMapping("/{complaintId}/triage")
     public ResponseEntity<Map<String, String>> triageComplaint(
             @PathVariable Long complaintId,
