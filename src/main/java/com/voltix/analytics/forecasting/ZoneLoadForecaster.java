@@ -1,4 +1,4 @@
-package com.voltix.analytics.forecasting;
+﻿package com.voltix.analytics.forecasting;
 
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
@@ -67,7 +67,6 @@ public class ZoneLoadForecaster {
                        AND aggregated_hour >= ?
                     """, Double.class, tenantId, zoneId, ZonedDateTime.now().minusHours(24));
 
-            // Lag features: most recent actual consumption 1h and 2h before targetTime
             Double lag1h = jdbcTemplate.queryForObject("""
                     SELECT total_kw_consumed
                       FROM zone_hourly_aggregates
@@ -86,8 +85,6 @@ public class ZoneLoadForecaster {
                      LIMIT 1
                     """, Double.class, tenantId, zoneId, targetTime.minusHours(2));
 
-            // If no lag data exists at all, ONNX model input still requires 5 features —
-            // fall back to heuristic instead of feeding fabricated lag values.
             if (lag1h == null || lag2h == null) {
                 log.warn("Insufficient historical data for lag features (zoneId={}). Using heuristic.", zoneId);
                 return evaluateHeuristic(tenantId, zoneId, targetTime);
@@ -95,35 +92,12 @@ public class ZoneLoadForecaster {
 
             float tempVal = avgTemp != null ? avgTemp.floatValue() : 15.0f;
             float hourVal = (float) targetTime.getHour();
-            float dayVal = (float) (targetTime.getDayOfWeek().getValue() - 1); // 0-6 index mapping
+            float dayVal = (float) (targetTime.getDayOfWeek().getValue() - 1);
             float lag1Val = lag1h.floatValue();
             float lag2Val = lag2h.floatValue();
 
-            Double lag1 = jdbcTemplate.query("""
-                SELECT total_kw_consumed
-                  FROM zone_hourly_aggregates
-                 WHERE tenant_id = ? AND zone_id = ?
-                   AND aggregated_hour = ?
-                """, rs -> rs.next() ? rs.getDouble(1) : null,
-                tenantId, zoneId, targetTime.minusHours(1).truncatedTo(java.time.temporal.ChronoUnit.HOURS));
-
-            Double lag2 = jdbcTemplate.query("""
-                SELECT total_kw_consumed
-                  FROM zone_hourly_aggregates
-                 WHERE tenant_id = ? AND zone_id = ?
-                   AND aggregated_hour = ?
-                """, rs -> rs.next() ? rs.getDouble(1) : null,
-                tenantId, zoneId, targetTime.minusHours(2).truncatedTo(java.time.temporal.ChronoUnit.HOURS));
-
-            float lag1Val = lag1 != null ? lag1.floatValue() : 0.0f;
-            float lag2Val = lag2 != null ? lag2.floatValue() : 0.0f;
-
             String inputName = session.getInputNames().iterator().next();
-<<<<<<< HEAD
             float[][] features = new float[][] { { hourVal, dayVal, tempVal, lag1Val, lag2Val } };
-=======
-            float[][] features = new float[][]{{ hourVal, dayVal, tempVal, lag1Val, lag2Val }};
->>>>>>> fix/auth-and-roles
 
             try (OnnxTensor tensor = OnnxTensor.createTensor(environment, features);
                     OrtSession.Result result = session.run(Map.of(inputName, tensor))) {
