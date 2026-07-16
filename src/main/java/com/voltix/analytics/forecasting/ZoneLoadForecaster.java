@@ -30,10 +30,10 @@ public class ZoneLoadForecaster {
     private final OnnxSessionPool loadForecasterSessionPool;
 
     public ZoneLoadForecaster(JdbcTemplate jdbcTemplate,
-                              VoltixProperties properties,
-                              ResourceLoader resourceLoader,
-                              OrtEnvironment environment,
-                              @Qualifier("loadForecasterSessionPool") OnnxSessionPool loadForecasterSessionPool) {
+            VoltixProperties properties,
+            ResourceLoader resourceLoader,
+            OrtEnvironment environment,
+            @Qualifier("loadForecasterSessionPool") OnnxSessionPool loadForecasterSessionPool) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
         this.resourceLoader = resourceLoader;
@@ -60,23 +60,50 @@ public class ZoneLoadForecaster {
                 return evaluateHeuristic(tenantId, zoneId, targetTime);
             }
 
-            // Fetch average temperature for the zone/overall from database for current features
             Double avgTemp = jdbcTemplate.queryForObject("""
-                SELECT COALESCE(AVG(avg_temperature), 15.0)
-                  FROM zone_hourly_aggregates
-                 WHERE tenant_id = ? AND zone_id = ?
-                   AND aggregated_hour >= ?
-                """, Double.class, tenantId, zoneId, ZonedDateTime.now().minusHours(24));
-            
+                    SELECT COALESCE(AVG(avg_temperature), 15.0)
+                      FROM zone_hourly_aggregates
+                     WHERE tenant_id = ? AND zone_id = ?
+                       AND aggregated_hour >= ?
+                    """, Double.class, tenantId, zoneId, ZonedDateTime.now().minusHours(24));
+
+            // Lag features: most recent actual consumption 1h and 2h before targetTime
+            Double lag1h = jdbcTemplate.queryForObject("""
+                    SELECT total_kw_consumed
+                      FROM zone_hourly_aggregates
+                     WHERE tenant_id = ? AND zone_id = ?
+                       AND aggregated_hour <= ?
+                     ORDER BY aggregated_hour DESC
+                     LIMIT 1
+                    """, Double.class, tenantId, zoneId, targetTime.minusHours(1));
+
+            Double lag2h = jdbcTemplate.queryForObject("""
+                    SELECT total_kw_consumed
+                      FROM zone_hourly_aggregates
+                     WHERE tenant_id = ? AND zone_id = ?
+                       AND aggregated_hour <= ?
+                     ORDER BY aggregated_hour DESC
+                     LIMIT 1
+                    """, Double.class, tenantId, zoneId, targetTime.minusHours(2));
+
+            // If no lag data exists at all, ONNX model input still requires 5 features —
+            // fall back to heuristic instead of feeding fabricated lag values.
+            if (lag1h == null || lag2h == null) {
+                log.warn("Insufficient historical data for lag features (zoneId={}). Using heuristic.", zoneId);
+                return evaluateHeuristic(tenantId, zoneId, targetTime);
+            }
+
             float tempVal = avgTemp != null ? avgTemp.floatValue() : 15.0f;
             float hourVal = (float) targetTime.getHour();
             float dayVal = (float) (targetTime.getDayOfWeek().getValue() - 1); // 0-6 index mapping
+            float lag1Val = lag1h.floatValue();
+            float lag2Val = lag2h.floatValue();
 
             String inputName = session.getInputNames().iterator().next();
-            float[][] features = new float[][]{{ hourVal, dayVal, tempVal }};
+            float[][] features = new float[][] { { hourVal, dayVal, tempVal, lag1Val, lag2Val } };
 
             try (OnnxTensor tensor = OnnxTensor.createTensor(environment, features);
-                 OrtSession.Result result = session.run(Map.of(inputName, tensor))) {
+                    OrtSession.Result result = session.run(Map.of(inputName, tensor))) {
                 OptionalDouble parsedVal = parseFirstNumber(result.get(0).getValue());
                 if (parsedVal.isPresent()) {
                     return BigDecimal.valueOf(parsedVal.getAsDouble());
@@ -94,16 +121,17 @@ public class ZoneLoadForecaster {
     private BigDecimal evaluateHeuristic(Long tenantId, Long zoneId, ZonedDateTime targetTime) {
         try {
             Double avgKw = jdbcTemplate.queryForObject("""
-                SELECT COALESCE(AVG(total_kw_consumed), 1.5)
-                  FROM zone_hourly_aggregates
-                 WHERE tenant_id = ? AND zone_id = ?
-                   AND aggregated_hour >= ?
-                """, Double.class, tenantId, zoneId, ZonedDateTime.now().minusHours(24));
+                    SELECT COALESCE(AVG(total_kw_consumed), 1.5)
+                      FROM zone_hourly_aggregates
+                     WHERE tenant_id = ? AND zone_id = ?
+                       AND aggregated_hour >= ?
+                    """, Double.class, tenantId, zoneId, ZonedDateTime.now().minusHours(24));
 
             double prediction = (avgKw != null ? avgKw : 1.5) * 1.10;
             return BigDecimal.valueOf(prediction);
         } catch (Exception e) {
-            log.debug("Failed to calculate heuristic load prediction for zoneId={}. Defaulting to base load.", zoneId, e);
+            log.debug("Failed to calculate heuristic load prediction for zoneId={}. Defaulting to base load.", zoneId,
+                    e);
             return BigDecimal.valueOf(2.50);
         }
     }
