@@ -5,9 +5,9 @@ export const options = {
   scenarios: {
     constant_request_rate: {
       executor: 'constant-arrival-rate',
-      rate: 1000,
+      rate: __ENV.RATE ? parseInt(__ENV.RATE) : 1000,
       timeUnit: '1s',
-      duration: '10m', // Sustained for 10 minutes
+      duration: __ENV.DURATION ? __ENV.DURATION : '10m', // Sustained duration
       preAllocatedVUs: 100,
       maxVUs: 1000,
     },
@@ -18,7 +18,7 @@ export const options = {
   },
 };
 
-const token = "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZGV2aWNlLXNpbXVsYXRvciIsICJ0ZW5hbnRfaWQiOiAxLCAicm9sZXMiOiBbIm9wZXJhdG9yIl0sICJleHAiOiAxODgyNzI4MDAwfQ.c2lnbmF0dXJl";
+const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXZpY2Utc2ltdWxhdG9yIiwidGVuYW50X2lkIjoxLCJyb2xlcyI6WyJvcGVyYXRvciJdLCJleHAiOjE4ODI3MjgwMDB9.hdRIJ1XV-K87Vg01ywYRF9xrR8eywJG_K4W6DSLk9eA";
 
 function uuidv4() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
