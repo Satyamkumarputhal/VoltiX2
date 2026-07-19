@@ -17,12 +17,14 @@ const StatCard = React.memo(function StatCard({
   icon, label, value, color,
 }: { icon: React.ReactNode; label: string; value: string | number; color: string }) {
   return (
-    <div className="rounded-lg border border-grid-border bg-grid-raised p-4 flex flex-col gap-1.5">
+    <div className="rounded-lg border border-grid-border bg-grid-raised p-4 flex flex-col gap-2">
       <div className="flex items-center gap-1.5 text-xs text-grid-muted">
         <span className={color}>{icon}</span>
-        {label}
+        <span>{label}</span>
       </div>
-      <span className={`text-xl font-mono font-semibold ${color}`}>{value}</span>
+      <div className={`text-2xl font-mono font-bold ${color} leading-none`}>
+        {String(value)}
+      </div>
     </div>
   );
 });
