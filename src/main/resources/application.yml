@@ -1,4 +1,7 @@
 spring:
+  threads:
+    virtual:
+      enabled: true
   application:
     name: voltix-core
 
@@ -28,8 +31,6 @@ spring:
 server:
   port: 8080
   tomcat:
-    threads:
-      max: 240
     max-connections: 5000
     accept-count: 1000
 
