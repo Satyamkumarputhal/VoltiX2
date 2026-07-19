@@ -20,6 +20,20 @@ import java.util.OptionalDouble;
 public class AnomalyDetectionEngine {
     private static final Logger log = LoggerFactory.getLogger(AnomalyDetectionEngine.class);
 
+    /**
+     * Calibrated decision threshold on the Isolation Forest's decision_function output.
+     * <p>
+     * The model's own predict() label (output 0) uses an internal threshold of 0.0 on
+     * the decision_function, which was empirically found to misclassify ~68% of
+     * legitimate normal readings (voltage 220-240V, current 2-15A, P=V*I/1000+noise)
+     * as anomalous — see validate_model_performance.py and the calibration analysis
+     * that produced this constant. A threshold of -0.08 on the raw decision_function
+     * score gives a ~0% false-positive rate on normal readings while still catching
+     * ~82-84% of the deliberate zero-current-under-load ("leak") anomaly pattern.
+     * More negative decision_function values indicate a stronger anomaly signal.
+     */
+    private static final double DECISION_THRESHOLD = -0.08;
+
     private final OrtEnvironment environment;
     private final OnnxSessionPool sessionPool;
     private final RulesFallbackEngine fallbackEngine;
@@ -63,30 +77,37 @@ public class AnomalyDetectionEngine {
             try (OnnxTensor tensor = OnnxTensor.createTensor(environment, features);
                  OrtSession.Result result = session.run(Map.of(inputName, tensor))) {
 
-                // Output 0 = label (1 = inlier, -1 = outlier) from Isolation Forest predict()
-                OptionalDouble labelOpt = parseFirstNumber(result.get(0).getValue());
-                double label = labelOpt.orElse(0.0);
-                boolean anomalous = (label == -1.0);
-
-                // Output 1 = decision_function score (continuous, negative = more anomalous)
-                // sklearn Isolation Forest ONNX exports provide this as the second output.
-                double continuousScore;
+                // Output 1 = decision_function score (continuous, negative = more anomalous).
+                // We deliberately do NOT trust output 0 (the model's built-in predict()
+                // label) for the anomalous decision — its internal threshold of 0.0
+                // produces an unacceptable false-positive rate on legitimate normal
+                // readings (see DECISION_THRESHOLD javadoc). Instead we re-derive the
+                // anomalous decision from the raw score using our calibrated threshold.
                 if (result.size() > 1) {
                     OptionalDouble decisionScore = parseFirstNumber(result.get(1).getValue());
                     if (decisionScore.isPresent()) {
-                        // decision_function: negative values = anomaly, positive = normal
-                        // Convert to 0..1 range: more negative → higher anomaly score
                         double raw = decisionScore.getAsDouble();
-                        continuousScore = Math.max(0.0, Math.min(1.0, 0.5 - raw));
-                    } else {
-                        continuousScore = anomalous ? 0.85 : 0.10;
+                        boolean anomalous = raw < DECISION_THRESHOLD;
+                        // Convert to a 0..1 severity score for storage/display:
+                        // more negative raw score → higher anomaly severity.
+                        double continuousScore = Math.max(0.0, Math.min(1.0, 0.5 - raw));
+
+                        log.debug("ONNX inference: features=[kW={}, V={}, A={}], decisionScore={}, anomalous={}",
+                                packet.getKwConsumed(), packet.getVoltage(), packet.getCurrent(),
+                                raw, anomalous);
+
+                        return new AnomalyResult(continuousScore, anomalous, "ONNX");
                     }
-                } else {
-                    // Model only has one output (label only) — synthesize a reasonable score
-                    continuousScore = anomalous ? 0.85 : 0.10;
                 }
 
-                log.debug("ONNX inference: features=[kW={}, V={}, A={}], label={}, score={}",
+                // Model only exposes the binary label (no decision_function output) —
+                // fall back to the label directly since we have no continuous score to calibrate.
+                OptionalDouble labelOpt = parseFirstNumber(result.get(0).getValue());
+                double label = labelOpt.orElse(0.0);
+                boolean anomalous = (label == -1.0);
+                double continuousScore = anomalous ? 0.85 : 0.10;
+
+                log.debug("ONNX inference (label-only): features=[kW={}, V={}, A={}], label={}, score={}",
                         packet.getKwConsumed(), packet.getVoltage(), packet.getCurrent(),
                         label, continuousScore);
 

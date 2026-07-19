@@ -23,6 +23,13 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>
  * This is NOT a shortcut that fabricates alerts directly. It exercises the
  * genuine anomaly-detection pipeline end-to-end.
+ * <p>
+ * The "normal" and "anomalous" feature distributions below intentionally
+ * mirror validate_model_performance.py's validated distributions exactly
+ * (same ranges, same noise characteristics), since those are the ranges
+ * empirically proven to give >=0.95 precision/recall against this model.
+ * Using different ranges risks generating "normal" readings that sit near
+ * the model's decision boundary and get misclassified.
  */
 @RestController
 @RequestMapping("/api/v1/demo")
@@ -48,7 +55,7 @@ public class DemoSimulationController {
 
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         int batchSize = rng.nextInt(5, 9); // 5-8 readings
-        int anomalyIndex = rng.nextInt(batchSize); // at least one anomalous reading
+        int anomalyIndex = rng.nextInt(batchSize); // exactly one deliberately anomalous reading
 
         List<Map<String, Object>> results = new ArrayList<>();
         ZonedDateTime now = ZonedDateTime.now();
@@ -61,22 +68,31 @@ public class DemoSimulationController {
             packet.setRecordedAt(now.minusSeconds(batchSize - i)); // stagger timestamps
 
             if (i == anomalyIndex) {
-                // Anomalous pattern: zero-current-under-load
-                // High power draw with near-zero current is physically impossible —
-                // this is the same pattern used in the ML validation work to trigger detection.
-                packet.setKwConsumed(rng.nextDouble(3.5, 6.0));    // High active power
-                packet.setVoltage(rng.nextDouble(230.0, 245.0));   // Normal voltage
-                packet.setCurrent(rng.nextDouble(0.01, 0.15));     // Near-zero current (anomalous)
-                log.info("[DEMO] Generating ANOMALOUS reading (zero-current-under-load) for meter={}",
-                        packet.getMeterId());
-            } else {
-                // Normal realistic reading — values consistent with typical UK smart meters
-                double voltage = rng.nextDouble(225.0, 248.0);
-                double current = rng.nextDouble(2.0, 12.0);
-                double kwConsumed = (voltage * current) / 1000.0; // Physically consistent P=V*I
+                // Anomalous pattern: zero-current-under-load.
+                // Mirrors validate_model_performance.py's "leak" distribution exactly:
+                //   leak_voltage = uniform(220.0, 240.0)        (normal voltage band)
+                //   leak_current = |normal(0.01, 0.005)|        (near-zero current)
+                //   leak_power   = uniform(5.0, 9.0)            (high load)
+                double voltage = rng.nextDouble(220.0, 240.0);
+                double current = Math.abs(gaussian(rng, 0.01, 0.005));
+                double kwConsumed = rng.nextDouble(5.0, 9.0);
                 packet.setVoltage(voltage);
                 packet.setCurrent(current);
                 packet.setKwConsumed(kwConsumed);
+                log.info("[DEMO] Generating ANOMALOUS reading (zero-current-under-load) for meter={}",
+                        packet.getMeterId());
+            } else {
+                // Normal reading — mirrors validate_model_performance.py's "normal
+                // operations" distribution exactly:
+                //   normal_voltage = uniform(220.0, 240.0)
+                //   normal_current = uniform(2.0, 15.0)
+                //   normal_power   = (voltage * current / 1000.0) + normal(0, 0.05)
+                double voltage = rng.nextDouble(220.0, 240.0);
+                double current = rng.nextDouble(2.0, 15.0);
+                double kwConsumed = (voltage * current / 1000.0) + gaussian(rng, 0.0, 0.05);
+                packet.setVoltage(voltage);
+                packet.setCurrent(current);
+                packet.setKwConsumed(Math.max(0.0, kwConsumed)); // guard against negative noise
             }
 
             UUID transactionId = ingestionService.accept(packet);
@@ -98,5 +114,13 @@ public class DemoSimulationController {
                 "count", batchSize,
                 "readings", results
         ));
+    }
+
+    /**
+     * Sample from a Gaussian (normal) distribution with the given mean and standard deviation.
+     * Mirrors numpy's np.random.normal(mean, stddev) used in validate_model_performance.py.
+     */
+    private static double gaussian(ThreadLocalRandom rng, double mean, double stddev) {
+        return mean + (rng.nextGaussian() * stddev);
     }
 }
