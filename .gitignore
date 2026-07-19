@@ -42,3 +42,6 @@ dataset/
 voltix-app.log
 voltix-app.err.log
 gc.log*
+
+### Log artifacts ###
+*.log
