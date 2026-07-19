@@ -5,6 +5,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 /**
  * Serializable payload sent over the WebSocket /topic/alerts channel.
@@ -13,6 +14,9 @@ import java.time.ZonedDateTime;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class AlertWebSocketPayload {
+
+    // ISO-8601 without the [Region] suffix that ZonedDateTime.toString() adds
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private Long alertId;
     private Long tenantId;
@@ -36,7 +40,8 @@ public class AlertWebSocketPayload {
         payload.setAnomalyScore(alert.getAnomalyScore());
         payload.setPriorityScore(alert.getPriorityScore());
         payload.setStatus(alert.getStatus() != null ? alert.getStatus().name() : null);
-        payload.setDetectedAt(alert.getDetectedAt() != null ? alert.getDetectedAt().toString() : null);
+        payload.setDetectedAt(alert.getDetectedAt() != null
+                ? alert.getDetectedAt().format(ISO_FORMATTER) : null);
         return payload;
     }
 }

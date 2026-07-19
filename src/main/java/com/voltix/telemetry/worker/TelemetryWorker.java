@@ -38,6 +38,10 @@ public class TelemetryWorker {
         MDC.put("ZoneID", Long.toString(zoneId));
         try {
             AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
+            log.info("[{}] [{}] [{}] Features: kW={}, V={}, A={} → score={}, anomalous={}, source={}",
+                    transactionId, packet.getMeterId(), zoneId,
+                    packet.getKwConsumed(), packet.getVoltage(), packet.getCurrent(),
+                    result.score(), result.anomalous(), result.source());
             if (result.anomalous()) {
                 alertDispatchService.createAlert(tenantId, packet.getMeterId(), zoneId, "NTL_ANOMALY", result.score());
             }
