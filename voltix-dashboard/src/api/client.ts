@@ -1,15 +1,22 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig, type AxiosResponse } from 'axios';
 
-// ── Dev JWT (same as k6 load test token) ────────────────────
-// Replace with real auth flow once /auth/login endpoint is implemented
-const DEV_TOKEN = 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAiZGV2aWNlLXNpbXVsYXRvciIsICJ0ZW5hbnRfaWQiOiAxLCAicm9sZXMiOiBbIm9wZXJhdG9yIl0sICJleHAiOiAxODgyNzI4MDAwfQ.c2lnbmF0dXJl';
+// ── In-memory bearer token ───────────────────────────────────
+// Deliberately NOT persisted to localStorage/sessionStorage to avoid
+// exposing the bearer token to XSS. The AuthProvider owns the token
+// lifecycle and pushes it here via setAuthToken(); on a full page
+// reload the token is gone and the user must log in again.
+let authToken: string | null = null;
 
-function getToken(): string | null {
-  return localStorage.getItem('voltix_token') ?? DEV_TOKEN;
+// Optional callback invoked when the server rejects a token (401),
+// so the AuthProvider can clear session state and trigger a redirect.
+let onUnauthorized: (() => void) | null = null;
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
 }
 
-function clearToken(): void {
-  localStorage.removeItem('voltix_token');
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
 }
 
 // ── Axios instance ───────────────────────────────────────────
@@ -19,26 +26,24 @@ const client: AxiosInstance = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Request interceptor — inject Bearer token on every call
+// Request interceptor — inject the real Bearer token on every call
 client.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = getToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (authToken) {
+      config.headers.Authorization = `Bearer ${authToken}`;
     }
     return config;
   },
   (error) => Promise.reject(error),
 );
 
-// Response interceptor — handle 401 gracefully
+// Response interceptor — clear session on 401 and notify the app
 client.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error) => {
     if (error.response?.status === 401) {
-      clearToken();
-      // In production: redirect to /login
-      console.warn('[VoltiX] Unauthorized — token cleared');
+      authToken = null;
+      onUnauthorized?.();
     }
     return Promise.reject(error);
   },

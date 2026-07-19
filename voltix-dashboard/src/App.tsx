@@ -1,9 +1,12 @@
-import React, { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+import { AuthProvider } from './auth/AuthContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
 const Dashboard   = lazy(() => import('./pages/Dashboard'));
 const PublicSubmit = lazy(() => import('./pages/PublicSubmit'));
+const Login       = lazy(() => import('./pages/Login'));
 
 function LoadingFallback() {
   return (
@@ -17,12 +20,29 @@ function LoadingFallback() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Suspense fallback={<LoadingFallback />}>
-        <Routes>
-          <Route path="/"       element={<Dashboard />} />
-          <Route path="/report" element={<PublicSubmit />} />
-        </Routes>
-      </Suspense>
+      <AuthProvider>
+        <Suspense fallback={<LoadingFallback />}>
+          <Routes>
+            <Route path="/login"  element={<Login />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/report"
+              element={
+                <ProtectedRoute>
+                  <PublicSubmit />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </Suspense>
+      </AuthProvider>
     </BrowserRouter>
   );
 }
