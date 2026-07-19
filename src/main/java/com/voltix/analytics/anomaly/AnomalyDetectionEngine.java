@@ -20,20 +20,6 @@ import java.util.OptionalDouble;
 public class AnomalyDetectionEngine {
     private static final Logger log = LoggerFactory.getLogger(AnomalyDetectionEngine.class);
 
-    /**
-     * Calibrated decision threshold on the Isolation Forest's decision_function output.
-     * <p>
-     * The model's own predict() label (output 0) uses an internal threshold of 0.0 on
-     * the decision_function, which was empirically found to misclassify ~68% of
-     * legitimate normal readings (voltage 220-240V, current 2-15A, P=V*I/1000+noise)
-     * as anomalous — see validate_model_performance.py and the calibration analysis
-     * that produced this constant. A threshold of -0.08 on the raw decision_function
-     * score gives a ~0% false-positive rate on normal readings while still catching
-     * ~82-84% of the deliberate zero-current-under-load ("leak") anomaly pattern.
-     * More negative decision_function values indicate a stronger anomaly signal.
-     */
-    private static final double DECISION_THRESHOLD = -0.08;
-
     private final OrtEnvironment environment;
     private final OnnxSessionPool sessionPool;
     private final RulesFallbackEngine fallbackEngine;
@@ -77,37 +63,36 @@ public class AnomalyDetectionEngine {
             try (OnnxTensor tensor = OnnxTensor.createTensor(environment, features);
                  OrtSession.Result result = session.run(Map.of(inputName, tensor))) {
 
-                // Output 1 = decision_function score (continuous, negative = more anomalous).
-                // We deliberately do NOT trust output 0 (the model's built-in predict()
-                // label) for the anomalous decision — its internal threshold of 0.0
-                // produces an unacceptable false-positive rate on legitimate normal
-                // readings (see DECISION_THRESHOLD javadoc). Instead we re-derive the
-                // anomalous decision from the raw score using our calibrated threshold.
-                if (result.size() > 1) {
-                    OptionalDouble decisionScore = parseFirstNumber(result.get(1).getValue());
-                    if (decisionScore.isPresent()) {
-                        double raw = decisionScore.getAsDouble();
-                        boolean anomalous = raw < DECISION_THRESHOLD;
-                        // Convert to a 0..1 severity score for storage/display:
-                        // more negative raw score → higher anomaly severity.
-                        double continuousScore = Math.max(0.0, Math.min(1.0, 0.5 - raw));
-
-                        log.debug("ONNX inference: features=[kW={}, V={}, A={}], decisionScore={}, anomalous={}",
-                                packet.getKwConsumed(), packet.getVoltage(), packet.getCurrent(),
-                                raw, anomalous);
-
-                        return new AnomalyResult(continuousScore, anomalous, "ONNX");
-                    }
-                }
-
-                // Model only exposes the binary label (no decision_function output) —
-                // fall back to the label directly since we have no continuous score to calibrate.
+                // Anomaly decision: trust the model's own predict() label (output 0).
+                // This is the model's built-in decision boundary at the trained
+                // contamination=0.05 setting — the same documented, validated
+                // configuration reported in PLAN_OF_ACTION.md (precision=0.81,
+                // recall=0.97, accuracy=0.81 against the full validate_model_
+                // performance.py set). Do NOT replace this with a custom threshold
+                // on decision_function without re-running that full validation
+                // (normal + sag + swell + leak) and confirming an improvement —
+                // an earlier attempt at a custom -0.08 threshold was tuned only
+                // against a narrow anomaly pattern and measured 0.52 accuracy /
+                // 0.36 recall on the full set, worse than this baseline.
                 OptionalDouble labelOpt = parseFirstNumber(result.get(0).getValue());
                 double label = labelOpt.orElse(0.0);
                 boolean anomalous = (label == -1.0);
-                double continuousScore = anomalous ? 0.85 : 0.10;
 
-                log.debug("ONNX inference (label-only): features=[kW={}, V={}, A={}], label={}, score={}",
+                // Severity score for storage/display: use the continuous
+                // decision_function (output 1) when available so alerts get a
+                // varied, meaningful score instead of a flat 1.0 for every
+                // anomaly. This does NOT affect the anomalous/normal decision
+                // above — only the severity number attached to it.
+                double continuousScore;
+                if (result.size() > 1) {
+                    OptionalDouble decisionScore = parseFirstNumber(result.get(1).getValue());
+                    double raw = decisionScore.orElse(anomalous ? -0.15 : 0.05);
+                    continuousScore = Math.max(0.0, Math.min(1.0, 0.5 - raw));
+                } else {
+                    continuousScore = anomalous ? 0.85 : 0.10;
+                }
+
+                log.debug("ONNX inference: features=[kW={}, V={}, A={}], label={}, severityScore={}",
                         packet.getKwConsumed(), packet.getVoltage(), packet.getCurrent(),
                         label, continuousScore);
 
