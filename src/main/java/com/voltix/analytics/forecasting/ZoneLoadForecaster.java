@@ -1,4 +1,4 @@
-﻿package com.voltix.analytics.forecasting;
+package com.voltix.analytics.forecasting;
 
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
