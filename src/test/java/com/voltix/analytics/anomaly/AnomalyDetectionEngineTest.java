@@ -32,7 +32,10 @@ class AnomalyDetectionEngineTest {
         AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
         assertFalse(result.anomalous());
         assertEquals("ONNX", result.source());
-        assertEquals(1.0, result.score(), 0.01);
+        // Severity score for a normal reading should be on the low side of the 0..1
+        // range (see AnomalyDetectionEngine: continuousScore = 0.5 - decision_function,
+        // and normal readings have a positive decision_function).
+        assertTrue(result.score() < 0.5, "Expected a low severity score for a normal reading, got " + result.score());
     }
 
     @Test
@@ -46,7 +49,8 @@ class AnomalyDetectionEngineTest {
         AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
         assertTrue(result.anomalous());
         assertEquals("ONNX", result.source());
-        assertEquals(1.0, result.score(), 0.01);
+        // Severity score for an anomalous reading should be on the high side.
+        assertTrue(result.score() > 0.5, "Expected a high severity score for an anomalous reading, got " + result.score());
     }
 
     @Test
@@ -57,7 +61,7 @@ class AnomalyDetectionEngineTest {
         AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
         assertTrue(result.anomalous());
         assertEquals("ONNX", result.source());
-        assertEquals(1.0, result.score(), 0.01);
+        assertTrue(result.score() > 0.5, "Expected a high severity score for an anomalous reading, got " + result.score());
     }
 
     @Test
@@ -69,7 +73,7 @@ class AnomalyDetectionEngineTest {
         AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
         assertTrue(result.anomalous());
         assertEquals("ONNX", result.source());
-        assertEquals(1.0, result.score(), 0.01);
+        assertTrue(result.score() > 0.5, "Expected a high severity score for an anomalous reading, got " + result.score());
     }
 
     @Test
@@ -81,6 +85,6 @@ class AnomalyDetectionEngineTest {
         AnomalyResult result = anomalyDetectionEngine.evaluate(packet);
         assertTrue(result.anomalous());
         assertEquals("ONNX", result.source());
-        assertEquals(1.0, result.score(), 0.01);
+        assertTrue(result.score() > 0.5, "Expected a high severity score for an anomalous reading, got " + result.score());
     }
 }

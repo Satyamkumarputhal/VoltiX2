@@ -62,17 +62,41 @@ public class AnomalyDetectionEngine {
 
             try (OnnxTensor tensor = OnnxTensor.createTensor(environment, features);
                  OrtSession.Result result = session.run(Map.of(inputName, tensor))) {
-                OptionalDouble parsedScore = parseFirstNumber(result.get(0).getValue());
-                double score = parsedScore.orElse(0.0);
-                boolean anomalous;
-                if (score == 1.0) {
-                    anomalous = false;
-                } else if (score == -1.0) {
-                    anomalous = true;
+
+                // Anomaly decision: trust the model's own predict() label (output 0).
+                // This is the model's built-in decision boundary at the trained
+                // contamination=0.05 setting — the same documented, validated
+                // configuration reported in PLAN_OF_ACTION.md (precision=0.81,
+                // recall=0.97, accuracy=0.81 against the full validate_model_
+                // performance.py set). Do NOT replace this with a custom threshold
+                // on decision_function without re-running that full validation
+                // (normal + sag + swell + leak) and confirming an improvement —
+                // an earlier attempt at a custom -0.08 threshold was tuned only
+                // against a narrow anomaly pattern and measured 0.52 accuracy /
+                // 0.36 recall on the full set, worse than this baseline.
+                OptionalDouble labelOpt = parseFirstNumber(result.get(0).getValue());
+                double label = labelOpt.orElse(0.0);
+                boolean anomalous = (label == -1.0);
+
+                // Severity score for storage/display: use the continuous
+                // decision_function (output 1) when available so alerts get a
+                // varied, meaningful score instead of a flat 1.0 for every
+                // anomaly. This does NOT affect the anomalous/normal decision
+                // above — only the severity number attached to it.
+                double continuousScore;
+                if (result.size() > 1) {
+                    OptionalDouble decisionScore = parseFirstNumber(result.get(1).getValue());
+                    double raw = decisionScore.orElse(anomalous ? -0.15 : 0.05);
+                    continuousScore = Math.max(0.0, Math.min(1.0, 0.5 - raw));
                 } else {
-                    anomalous = score < 0.0 || score >= 0.5;
+                    continuousScore = anomalous ? 0.85 : 0.10;
                 }
-                return new AnomalyResult(Math.abs(score), anomalous, "ONNX");
+
+                log.debug("ONNX inference: features=[kW={}, V={}, A={}], label={}, severityScore={}",
+                        packet.getKwConsumed(), packet.getVoltage(), packet.getCurrent(),
+                        label, continuousScore);
+
+                return new AnomalyResult(continuousScore, anomalous, "ONNX");
             }
         } catch (Exception ex) {
             log.warn("ONNX anomaly inference failed. Falling back to deterministic rules.", ex);

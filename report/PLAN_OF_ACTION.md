@@ -2,8 +2,8 @@
 
 > **Purpose:** Self-contained handover reflecting the ACTUAL verified state of the project — not claims, not stale reports. Every status below has been personally confirmed via `mvn test` output, direct code review, or real request/response evidence, not agent self-reporting alone.
 >
-> **Last verified:** 2026-07-17
-> **Current build status:** ✅ PASSING — 32/32 tests, confirmed directly by the developer running `mvn test` after the auth-branch merge into `main`.
+> **Last verified:** 2026-07-19
+> **Current build status:** ✅ PASSING — 32/32 tests, confirmed directly via `mvn test` after merging `frontend/phase-2-demo-trigger` (fake metrics removal + demo-trigger endpoint) into `main`.
 >
 > **Project purpose note:** This is a university showcase project, not a production deployment. Priorities below are ordered for review-readiness within a 2–4 week window, not production hardening. Where a production-grade fix would take too long, the honest, documented tradeoff is the correct choice — and is called out explicitly below.
 
@@ -45,6 +45,7 @@ A real-time smart grid data ingestion and analysis system targeting Non-Technica
   **0.05 was chosen deliberately**: recall gains beyond this point are negligible (0.97→1.00 for no real benefit), while 0.05 already catches nearly all real anomalies. Chosen because a missed theft event is costlier in this domain than an extra false alarm/inspection.
 - `AnomalyDetectionEngineTest` regression from this change is **already fixed**: the borderline case (230V/10A/2.3kW) is preserved as its own documented test (`whenTelemetryIsBorderlineHighLoad_thenReturnAnomalous`), and the "normal" baseline test now uses a genuinely central value (240V/6A/1.5kW). Both pass.
 - **Known, honest limitation:** synthetic fault distributions are our best approximation of real theft/tampering; no labeled real-world incident data exists to validate against. State this plainly if asked in review — it's a structural limitation of unsupervised anomaly detection, not an oversight.
+- **Known, honest limitation (found during Phase 2 demo-trigger work, real and unresolved):** the aggregate `precision=0.81` above hides a real class-level imbalance. Measured directly against the model's own unmodified `predict()` label: a "normal" reading uniformly sampled across the full validated band (voltage 220-240V, current 2-15A, power=V·I/1000+noise) is misclassified as anomalous **~68% of the time**. This is not a bug — it's what `precision=0.81` on a 3:1 anomaly-heavy validation set actually implies once you isolate the normal class. It was not caught earlier because `validate_model_performance.py`'s aggregate metrics dilute it. A brief attempt to fix this with a custom decision-function threshold (instead of the model's built-in label) was tried and reverted — properly re-validated against the full set, it scored worse on accuracy/recall (0.52/0.36) than the existing baseline (0.81/0.97), so the model's original label logic was kept. **State this plainly if asked:** at `contamination=0.05`, a genuinely normal meter reading has a roughly 2-in-3 chance of triggering a false anomaly alert if its features are uniformly distributed across the validated normal range. Fixing this properly would require retraining and re-tuning `contamination` specifically against normal-class precision, which is a separate model-tuning decision, not something resolved by this session.
 
 ### 2.3 ML Track 2 — Macro Load Monitor — ✅ Fixed, real improvement (doc was stale on this)
 - **Original model was worse than predicting the average** (RMSE 18.43 vs. target std dev 14.90) — root cause: no lag/recent-consumption features, and an unguarded 2-hour shift vulnerable to silent timestamp-gap mispairing.
@@ -69,6 +70,14 @@ A real-time smart grid data ingestion and analysis system targeting Non-Technica
 ### 2.6 Dashboard / Frontend — ⚠️ Backend real, frontend needs work
 - WebSocket (STOMP) live connection confirmed genuinely real via direct audit — not static/seeded data. This is a real asset for the demo.
 - **Visual polish still needed** — developer's own assessment: functional but not visually appealing. Bounded time (2-3 days max) should go here; do not let this expand to consume review prep time.
+- **Fake `GridMetricsEngine` panel removed** — previously 100% `Math.random()` fabricated data with no backend call. Replaced with real summary stat cards (alert counts, active zones/meters) derived from the alert store.
+
+### 2.7 Demo-Trigger Endpoint — ✅ Done, real pipeline, one known residual limitation
+- New endpoint `POST /api/v1/demo/simulate-telemetry` (OPERATOR/ADMIN only via `@PreAuthorize`), for demonstrating the live anomaly-detection pipeline in front of a reviewer without waiting for real hardware or a real anomaly.
+- Generates a small batch (5-8) of realistic telemetry readings with exactly one deliberately anomalous zero-current-under-load reading, and submits ALL of them through the real ingestion pipeline (`TelemetryIngestionService.accept()` — the same path as real hardware telemetry, not a shortcut). Genuinely exercises ONNX inference and `AlertDispatchService`.
+- **Does NOT modify `AnomalyDetectionEngine` or the `contamination=0.05` decision logic** — a mid-session attempt to do so was reverted after proper re-validation showed it made things worse (see §2.2's new limitation entry above for the full story).
+- **Residual, accepted limitation:** because §2.2's normal-class false-positive rate (~68% over the full validated band) is real and unchanged, the demo's "normal" reading generator deliberately samples from a narrower, empirically-verified safe sub-region (voltage 235-240V, current 5-15A — found via grid search against the real model, ~0% false-positive rate there vs. ~68% over the full band) rather than the full validated range. This means the demo reliably shows "mostly normal + 1 clear anomaly" as intended, but it is *working around* the model's known precision weakness for demo purposes, not fixing it. If a reviewer feeds the system a normal reading from outside that narrow safe zone (e.g., via the real `/telemetry/submit` endpoint with voltage near 225-230V), the same ~68% false-positive behavior will show up exactly as it does anywhere else in the system. State this plainly if asked — it's an honest scoping choice for a demo trigger, not evidence the underlying issue is resolved.
+- Verified live through the real backend: 3 consecutive runs (6/7/8 readings each) produced exactly 1 alert per run, matching the intended anomaly, zero false positives and zero misses among 21 total readings submitted.
 
 ---
 
@@ -100,6 +109,7 @@ src/test/java/com/voltix/
 4. **Write-path tenant scoping sweep incomplete.** `TelemetryStagingRepository.markFailed` was fixed, but a full sweep of every non-`find*` repository method (custom `@Query`, `countBy*`, `deleteBy*`) for missing tenant scoping was never exhaustively completed and evidenced with a real grep + verification. Worth a final pass if time allows.
 5. **Secrets hardcoded.** `jwt-secret` in `application.yml` is a placeholder dev value, not externalized via environment variables. Fine for a showcase project; mention as a known production gap if asked.
 6. **Observability, CI, deployment docs** — not built. Given project scope (review, not production), these are reasonable to explicitly defer and mention as "known future work" rather than spend remaining time on.
+7. **Anomaly model's normal-class false-positive rate (~68%) — real, unresolved, worked around but not fixed.** See §2.2 and §2.7 for the full finding. At `contamination=0.05`, a genuinely normal reading uniformly sampled across the full validated band has roughly a 2-in-3 chance of being misclassified as anomalous. The demo-trigger endpoint avoids this by sampling from a narrower, verified-safe input range, but the underlying model behavior on the real `/telemetry/submit` path is unchanged. Properly fixing this would mean retraining and re-tuning `contamination` specifically for normal-class precision (a separate model-tuning decision, out of scope for the demo-trigger work) — not a quick patch.
 
 ---
 
@@ -111,13 +121,15 @@ src/test/java/com/voltix/
 - ✅ ML Track 1 tuned and validated (contamination=0.05, documented tradeoff)
 - ✅ ML Track 2 fixed (lag features), verified real improvement
 - ✅ Auth: signature verification, login, role enforcement, verified
+- ✅ Fake `GridMetricsEngine` frontend panel removed, replaced with real summary stats
+- ✅ Demo-trigger endpoint (`POST /api/v1/demo/simulate-telemetry`) added, real pipeline, verified live (see §2.7)
 - ✅ Merge into `main` complete, 32/32 tests passing
 
 ### Next, in order
 1. **Decide the fsync/durability tradeoff (§4 item 1).** Either test the batched-write approach, or document the real achievable throughput honestly with durability intact. This is your strongest "I found a real engineering tradeoff and made a documented decision" story for review — don't skip documenting it even if you don't have time to fully solve it.
 2. **Frontend visual pass — bounded to 2-3 days.** Clean layout, readable alerts, no breakage. Do not chase feature completeness here.
-3. **Write the "known limitations" one-pager** covering §4 items 2-6 — a reviewer respects "I know what's not done and why" far more than an unblemished claim.
-4. **Rehearse explaining, out loud, without notes:** how Isolation Forest works, why `contamination=0.05` was chosen over 0.02/0.08, why the tenant-isolation bug happened and how it was fixed, why the fsync tradeoff exists and what was decided, why the original JWT filter was a real security hole.
+3. **Write the "known limitations" one-pager** covering §4 items 2-7 — a reviewer respects "I know what's not done and why" far more than an unblemished claim.
+4. **Rehearse explaining, out loud, without notes:** how Isolation Forest works, why `contamination=0.05` was chosen over 0.02/0.08 despite its ~68% normal-class false-positive rate, why the tenant-isolation bug happened and how it was fixed, why the fsync tradeoff exists and what was decided, why the original JWT filter was a real security hole.
 
 ---
 
