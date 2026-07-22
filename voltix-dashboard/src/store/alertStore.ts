@@ -26,9 +26,14 @@ export const useAlertStore = create<AlertStore>((set) => ({
   clearAlerts: () => set({ alerts: [], unreadCount: 0 }),
 
   markAcknowledged: (alertId) =>
-    set((state) => ({
-      alerts: state.alerts.map((a) =>
-        a.alertId === alertId ? { ...a, status: 'ACKNOWLEDGED' as AlertStatus } : a,
-      ),
-    })),
+    set((state) => {
+      const target = state.alerts.find((a) => a.alertId === alertId);
+      const alreadyAcked = !target || target.status === 'ACKNOWLEDGED';
+      return {
+        alerts: state.alerts.map((a) =>
+          a.alertId === alertId ? { ...a, status: 'ACKNOWLEDGED' as AlertStatus } : a,
+        ),
+        unreadCount: alreadyAcked ? state.unreadCount : Math.max(0, state.unreadCount - 1),
+      };
+    }),
 }));

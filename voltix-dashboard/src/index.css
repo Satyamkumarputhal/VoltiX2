@@ -22,6 +22,7 @@
   /* Custom animations */
   --animate-slide-in: slideIn 0.2s ease-out;
   --animate-fade-in:  fadeIn 0.3s ease-out;
+  --animate-pulse-critical: pulseCritical 1.5s ease-in-out infinite;
 
   /* Keyframes */
   @keyframes slideIn {
@@ -31,6 +32,10 @@
   @keyframes fadeIn {
     0%   { opacity: 0; }
     100% { opacity: 1; }
+  }
+  @keyframes pulseCritical {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.6; }
   }
 }
 

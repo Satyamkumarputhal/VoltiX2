@@ -11,9 +11,15 @@ interface UseWebSocketReturn {
   reconnectAttempts: number;
 }
 
-// Use native WebSocket URL — works in all modern browsers without sockjs-client
-// The backend exposes a plain WS endpoint at /ws/alerts/websocket (Spring's SockJS raw path)
-const WS_URL         = 'ws://localhost:8080/ws/alerts/websocket';
+// Use the Vite dev-server proxy for WebSocket connections (/ws is proxied
+// to localhost:8080 with ws:true in vite.config.ts). This avoids hardcoding
+// a host/port and works in any environment where the proxy is configured.
+// In production, the same relative path resolves against the serving origin.
+function getWsUrl(): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws/alerts/websocket`;
+}
+
 const MAX_BACKOFF_MS = 30_000;
 
 function computeBackoff(attempt: number): number {
@@ -39,7 +45,7 @@ export function useWebSocket(): UseWebSocketReturn {
 
     const stompClient = new Client({
       // Use native browser WebSocket directly — no SockJS needed for modern browsers
-      brokerURL: WS_URL,
+      brokerURL: getWsUrl(),
       reconnectDelay: 0, // We manage reconnect ourselves for precise backoff
 
       onConnect: () => {

@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAlertStore } from '../store/alertStore';
 import { useAuth } from '../auth/AuthContext';
@@ -7,7 +7,7 @@ import { GridMetricsEngine } from '../components/GridMetricsEngine';
 import { ComplaintTriagePanel } from '../components/ComplaintTriagePanel';
 import { ConnectionStatus } from '../components/ConnectionStatus';
 import { ErrorBoundary } from '../components/ErrorBoundary';
-import { Zap, LayoutDashboard, LogOut, UserCircle } from 'lucide-react';
+import { Zap, LayoutDashboard, LogOut, UserCircle, FileWarning } from 'lucide-react';
 
 export default function Dashboard() {
   const { status, reconnectAttempts } = useWebSocket();
@@ -29,6 +29,16 @@ export default function Dashboard() {
           <Zap className="w-5 h-5 text-accent-amber" />
           <span className="font-semibold text-sm text-white tracking-wide">VoltiX</span>
           <span className="text-grid-muted text-xs">/ Grid Command Center</span>
+          <nav className="ml-4 flex items-center gap-3">
+            <Link to="/" className="text-xs text-white font-medium flex items-center gap-1">
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              Dashboard
+            </Link>
+            <Link to="/report" className="text-xs text-grid-muted hover:text-white transition-colors flex items-center gap-1">
+              <FileWarning className="w-3.5 h-3.5" />
+              Report Incident
+            </Link>
+          </nav>
         </div>
 
         <div className="flex items-center gap-4">

@@ -11,11 +11,15 @@ interface FormState {
 
 type SubmitStatus = 'idle' | 'submitting' | 'success' | 'rate_limited' | 'error';
 
-const ZONES = [1, 2, 3, 4, 5]; // Extend with real zone fetch in production
+// NOTE: No backend endpoint currently exposes a zone list (only GET /complaints
+// exists). Adding one was explicitly out of scope for Phase 3. These values
+// match the seeded grid_zones from V2_1__Seed_Tenants_And_Zones.sql.
+// TODO: Replace with a real fetch when a GET /api/v1/zones endpoint is added.
+const ZONES = [1, 2];
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const update = useCallback((v: T) => {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setDebounced(v), delay);
@@ -47,8 +51,8 @@ export const ComplaintSubmissionForm = React.memo(function ComplaintSubmissionFo
   const [submitStatus, setStatus] = useState<SubmitStatus>('idle');
   const [responseMsg, setMsg]   = useState('');
 
-  // Debounce validation — 500ms after user stops typing
-  const debouncedForm = useDebounce(form, 500);
+  // Debounce validation — 175ms after user stops typing
+  const debouncedForm = useDebounce(form, 175);
   const errors        = React.useMemo(() => validate(debouncedForm), [debouncedForm]);
   const isValid       = Object.keys(errors).length === 0;
 

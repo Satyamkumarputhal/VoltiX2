@@ -67,7 +67,7 @@ export interface ApiError {
 
 export interface ComplaintSubmitResponse {
   status:      string;
-  complaintId?: string;
+  complaintId?: number;
   message:     string;
 }
 
