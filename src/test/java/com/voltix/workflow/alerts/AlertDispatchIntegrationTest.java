@@ -28,26 +28,39 @@ class AlertDispatchIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    // Dedicated fixture IDs for this test only -- chosen well outside the
+    // range used by real dev/demo seed data (tenants 1-2, zones 1-2, meters
+    // SM-0..SM-4, users operator/inspector/admin) so this test can never
+    // collide with or delete them. This test used to unconditionally
+    // DELETE FROM smart_meters/grid_zones/users/tenants (ALL rows), which
+    // silently destroyed the shared dev database's seed data on every
+    // "mvn test" run.
+    private static final long TEST_TENANT_ID = 999_004L;
+    private static final long TEST_ZONE_ID = 999_004L;
+    private static final String TEST_METER_ID = "METER-ALERT-TEST-999004";
+
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("DELETE FROM system_alerts");
-        jdbcTemplate.execute("DELETE FROM public_complaints");
-        jdbcTemplate.execute("DELETE FROM zone_hourly_aggregates");
-        jdbcTemplate.execute("DELETE FROM metrics_history");
-        jdbcTemplate.execute("DELETE FROM telemetry_staging");
-        jdbcTemplate.execute("DELETE FROM smart_meters");
-        jdbcTemplate.execute("DELETE FROM grid_zones");
-        jdbcTemplate.execute("DELETE FROM users");
-        jdbcTemplate.execute("DELETE FROM tenants");
+        // Only ever touches this test's own dedicated fixture rows -- never
+        // a blanket DELETE affecting other tenants/zones/meters/users.
+        jdbcTemplate.update("DELETE FROM system_alerts WHERE meter_id = ?", TEST_METER_ID);
+        jdbcTemplate.update("DELETE FROM metrics_history WHERE meter_id = ?", TEST_METER_ID);
+        jdbcTemplate.update("DELETE FROM telemetry_staging WHERE meter_id = ?", TEST_METER_ID);
+        jdbcTemplate.update("DELETE FROM smart_meters WHERE meter_id = ?", TEST_METER_ID);
+        jdbcTemplate.update("DELETE FROM grid_zones WHERE zone_id = ?", TEST_ZONE_ID);
+        jdbcTemplate.update("DELETE FROM tenants WHERE tenant_id = ?", TEST_TENANT_ID);
 
-        jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (1, 'Test Tenant', 'ACTIVE')");
-        jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (1, 1, 'High Risk Zone', 2.50)");
-        jdbcTemplate.execute("INSERT INTO smart_meters (meter_id, tenant_id, zone_id, serial_number, status) VALUES ('METER-001', 1, 1, 'SN-001', 'ACTIVE')");
+        jdbcTemplate.update("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (?, ?, 'ACTIVE')",
+                TEST_TENANT_ID, "Alert Test Tenant");
+        jdbcTemplate.update("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (?, ?, ?, 2.50)",
+                TEST_ZONE_ID, TEST_TENANT_ID, "Alert Test High Risk Zone");
+        jdbcTemplate.update("INSERT INTO smart_meters (meter_id, tenant_id, zone_id, serial_number, status) VALUES (?, ?, ?, ?, 'ACTIVE')",
+                TEST_METER_ID, TEST_TENANT_ID, TEST_ZONE_ID, "SN-" + TEST_METER_ID);
     }
 
     @Test
     void testAlertCreationAndScoring() {
-        SystemAlert alert = alertDispatchService.createAlert(1L, "METER-001", 1L, "NTL_ANOMALY", 0.85);
+        SystemAlert alert = alertDispatchService.createAlert(TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID, "NTL_ANOMALY", 0.85);
 
         assertNotNull(alert.getAlertId());
         assertEquals("NTL_ANOMALY", alert.getAlertType());
@@ -64,8 +77,11 @@ class AlertDispatchIntegrationTest {
         assertEquals(AlertSeverity.MEDIUM, alert.getSeverity());
         assertEquals(AlertStatus.OPEN, alert.getStatus());
 
-        // Verify stored in DB
-        List<SystemAlert> stored = alertRepository.findAll();
+        // Verify stored in DB (scoped to this test's own meter, since other
+        // tests/dev traffic may have unrelated alerts in the shared database)
+        List<SystemAlert> stored = alertRepository.findAll().stream()
+                .filter(a -> TEST_METER_ID.equals(a.getMeterId()))
+                .toList();
         assertEquals(1, stored.size());
         assertEquals(alert.getAlertId(), stored.get(0).getAlertId());
     }

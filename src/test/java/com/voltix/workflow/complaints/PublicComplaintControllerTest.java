@@ -35,27 +35,51 @@ class PublicComplaintControllerTest {
 
     private ComplaintRequest complaintRequest;
 
+    // IMPORTANT: this test used to unconditionally DELETE FROM smart_meters/
+    // grid_zones/users/tenants (ALL rows) and reseed only a minimal fixture,
+    // which silently destroyed the shared dev database's real seed data
+    // (operator/inspector/admin users, SM-0..SM-4 meters, Zone A/B) on every
+    // "mvn test" run -- there is no separate test datasource for this
+    // project. Fixed to never delete anything outside its own rows.
+    // <p>
+    // Several tests here log in as the REAL seeded "operator" user via the
+    // actual /auth/login endpoint, and that user's real tenant_id is 1 (see
+    // V3__Auth_And_Seed_Test_Users.sql) -- so this class intentionally reuses
+    // the real, pre-existing tenant_id=1 / zone_id=1 (never deletes or
+    // recreates them) rather than inventing a fresh tenant for "operator"'s
+    // own complaints. Only the dynamically-created "second tenant" used in
+    // the foreign-tenant tests gets a dedicated, cleaned-up fixture ID.
+    private static final long OPERATOR_REAL_TENANT_ID = 1L;
+    private static final long OPERATOR_REAL_ZONE_ID = 1L;
+    private static final long TEST_TENANT_2_ID = 999_008L;
+    private static final long TEST_ZONE_2_ID = 999_008L;
+    private static final String TEST_OPERATOR_2_USERNAME = "operator2-test999008";
+
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("DELETE FROM system_alerts");
-        jdbcTemplate.execute("DELETE FROM public_complaints");
-        jdbcTemplate.execute("DELETE FROM zone_hourly_aggregates");
-        jdbcTemplate.execute("DELETE FROM metrics_history");
-        jdbcTemplate.execute("DELETE FROM telemetry_staging");
-        jdbcTemplate.execute("DELETE FROM smart_meters");
-        jdbcTemplate.execute("DELETE FROM grid_zones");
-        jdbcTemplate.execute("DELETE FROM users");
-        jdbcTemplate.execute("DELETE FROM tenants");
-
-        jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (1, 'Test Tenant', 'ACTIVE')");
-        jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (1, 1, 'Zone A', 1.0)");
-        jdbcTemplate.execute("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (1, 'operator', '$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq', 'OPERATOR')");
+        // Only ever touches this test's own dedicated fixture rows -- never
+        // a blanket DELETE affecting other tenants/zones/users. Complaints
+        // are cleared for the real tenant 1 (this test's own writes) and the
+        // dynamically-created test tenant 2; the tenant/zone rows themselves
+        // are never deleted for tenant 1 (real, pre-existing), only for the
+        // test-local tenant 2.
+        jdbcTemplate.update("DELETE FROM public_complaints WHERE tenant_id IN (?, ?)", OPERATOR_REAL_TENANT_ID, TEST_TENANT_2_ID);
+        jdbcTemplate.update("DELETE FROM users WHERE username = ?", TEST_OPERATOR_2_USERNAME);
+        jdbcTemplate.update("DELETE FROM grid_zones WHERE zone_id = ?", TEST_ZONE_2_ID);
+        jdbcTemplate.update("DELETE FROM tenants WHERE tenant_id = ?", TEST_TENANT_2_ID);
 
         complaintRequest = new ComplaintRequest();
-        complaintRequest.setZoneId(1L);
+        complaintRequest.setZoneId(OPERATOR_REAL_ZONE_ID);
         complaintRequest.setIncidentAddress("123 Power Grid Lane");
         complaintRequest.setDescription("Wire tapping anomaly observed on transformer node.");
-        complaintRequest.setTenantId(1L);
+        complaintRequest.setTenantId(OPERATOR_REAL_TENANT_ID);
+    }
+
+    private long countComplaintsForTestTenant() {
+        return complaintRepository.findAll().stream()
+                .filter(c -> OPERATOR_REAL_TENANT_ID == c.getTenantId()
+                        && "123 Power Grid Lane".equals(c.getIncidentAddress()))
+                .count();
     }
 
     private String loginAndGetToken(String username, String password) throws Exception {
@@ -79,7 +103,7 @@ class PublicComplaintControllerTest {
                 .andExpect(jsonPath("$.status").value("CREATED"))
                 .andExpect(jsonPath("$.message").value("Complaint submitted successfully and is pending verification."));
 
-        assertEquals(1, complaintRepository.count());
+        assertEquals(1, countComplaintsForTestTenant());
     }
 
     @Test
@@ -101,7 +125,7 @@ class PublicComplaintControllerTest {
                 .andExpect(jsonPath("$.message").value("A complaint for this address is already under verification."));
 
         // Count should still be 1
-        assertEquals(1, complaintRepository.count());
+        assertEquals(1, countComplaintsForTestTenant());
     }
 
     @Test
@@ -137,8 +161,11 @@ class PublicComplaintControllerTest {
                         .content(objectMapper.writeValueAsString(complaintRequest)))
                 .andExpect(status().isCreated());
 
-        // Get the ID of the complaint
-        Long complaintId = complaintRepository.findAll().get(0).getComplaintId();
+        // Get the ID of the complaint (scoped to this test's own tenant)
+        Long complaintId = complaintRepository.findAll().stream()
+                .filter(c -> OPERATOR_REAL_TENANT_ID == c.getTenantId())
+                .findFirst().orElseThrow()
+                .getComplaintId();
 
         // Perform patch request to triage
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/complaints/{complaintId}/triage", complaintId)
@@ -168,9 +195,9 @@ class PublicComplaintControllerTest {
                 .andExpect(jsonPath("$.status").value("CREATED"));
 
         PublicComplaint saved = complaintRepository.findAll().stream()
-                .filter(c -> "123 Power Grid Lane".equals(c.getIncidentAddress()))
+                .filter(c -> "123 Power Grid Lane".equals(c.getIncidentAddress()) && OPERATOR_REAL_ZONE_ID == c.getZoneId())
                 .findFirst().orElseThrow();
-        assertEquals(1L, saved.getTenantId()); // Resolved from Zone A (tenant_id = 1)
+        assertEquals(OPERATOR_REAL_TENANT_ID, saved.getTenantId()); // Resolved from this test's zone
     }
 
     @Test
@@ -192,12 +219,12 @@ class PublicComplaintControllerTest {
     @Test
     @org.springframework.security.test.context.support.WithMockUser(username = "operator", roles = "OPERATOR")
     void whenOperatorListComplaints_thenReturnSameTenantComplaintsOnly() throws Exception {
-        // Seed Tenant 1's complaint
+        // Seed Tenant 1's complaint (real, pre-existing tenant 1)
         PublicComplaint c1 = new PublicComplaint();
-        c1.setTenantId(1L);
-        c1.setZoneId(1L);
+        c1.setTenantId(OPERATOR_REAL_TENANT_ID);
+        c1.setZoneId(OPERATOR_REAL_ZONE_ID);
         c1.setIncidentAddress("123 Power Grid Lane");
-        c1.setAddressHash("hashT1");
+        c1.setAddressHash("hashT1-" + OPERATOR_REAL_TENANT_ID);
         c1.setDescription("T1 Complaint");
         c1.setSubmitterIpHash("ip1");
         c1.setStatus(ComplaintStatus.PENDING_VERIFICATION);
@@ -205,15 +232,18 @@ class PublicComplaintControllerTest {
         complaintRepository.saveAndFlush(c1);
 
         // Seed Tenant 2 and its complaint
-        jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (2, 'Tenant 2', 'ACTIVE')");
-        jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (2, 2, 'Zone B', 1.0)");
-        jdbcTemplate.execute("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (2, 'operator2', '$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq', 'OPERATOR')");
+        jdbcTemplate.update("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (?, ?, 'ACTIVE')",
+                TEST_TENANT_2_ID, "Complaint Test Tenant 2");
+        jdbcTemplate.update("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (?, ?, ?, 1.0)",
+                TEST_ZONE_2_ID, TEST_TENANT_2_ID, "Complaint Test Zone 2");
+        jdbcTemplate.update("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (?, ?, ?, 'OPERATOR')",
+                TEST_TENANT_2_ID, TEST_OPERATOR_2_USERNAME, "$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq");
 
         PublicComplaint c2 = new PublicComplaint();
-        c2.setTenantId(2L);
-        c2.setZoneId(2L);
+        c2.setTenantId(TEST_TENANT_2_ID);
+        c2.setZoneId(TEST_ZONE_2_ID);
         c2.setIncidentAddress("456 Street T2");
-        c2.setAddressHash("hashT2");
+        c2.setAddressHash("hashT2-" + TEST_TENANT_2_ID);
         c2.setDescription("T2 Complaint");
         c2.setSubmitterIpHash("ip2");
         c2.setStatus(ComplaintStatus.PENDING_VERIFICATION);
@@ -221,7 +251,7 @@ class PublicComplaintControllerTest {
         complaintRepository.saveAndFlush(c2);
 
         String token1 = loginAndGetToken("operator", "password");
-        String token2 = loginAndGetToken("operator2", "password");
+        String token2 = loginAndGetToken(TEST_OPERATOR_2_USERNAME, "password");
 
         // Operator of Tenant 1 fetches data
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/complaints")
@@ -245,15 +275,17 @@ class PublicComplaintControllerTest {
     @Test
     @org.springframework.security.test.context.support.WithMockUser(username = "operator", roles = "OPERATOR")
     void whenOperatorTriageForeignComplaint_thenReturn403Forbidden() throws Exception {
-        // Seed Tenant 2 and its complaint
-        jdbcTemplate.execute("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (2, 'Tenant 2', 'ACTIVE')");
-        jdbcTemplate.execute("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (2, 2, 'Zone B', 1.0)");
+        // Seed a dedicated second tenant/zone for this test (cleaned up in setUp())
+        jdbcTemplate.update("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (?, ?, 'ACTIVE')",
+                TEST_TENANT_2_ID, "Complaint Test Tenant 2");
+        jdbcTemplate.update("INSERT INTO grid_zones (zone_id, tenant_id, zone_name, risk_multiplier) VALUES (?, ?, ?, 1.0)",
+                TEST_ZONE_2_ID, TEST_TENANT_2_ID, "Complaint Test Zone 2");
 
         PublicComplaint c2 = new PublicComplaint();
-        c2.setTenantId(2L);
-        c2.setZoneId(2L);
+        c2.setTenantId(TEST_TENANT_2_ID);
+        c2.setZoneId(TEST_ZONE_2_ID);
         c2.setIncidentAddress("456 Street T2");
-        c2.setAddressHash("hashT2");
+        c2.setAddressHash("hashT2-" + TEST_TENANT_2_ID);
         c2.setDescription("T2 Complaint");
         c2.setSubmitterIpHash("ip2");
         c2.setStatus(ComplaintStatus.PENDING_VERIFICATION);
