@@ -5,8 +5,8 @@ import type { PublicComplaint, ComplaintStatus } from '../types';
 
 const STATUS_LABELS: Record<ComplaintStatus, string> = {
   PENDING_VERIFICATION: 'Pending',
-  UNDER_INVESTIGATION:  'Investigating',
-  RESOLVED:             'Resolved',
+  VERIFIED:             'Verified',
+  ESCALATED:            'Escalated',
   REJECTED:             'Rejected',
 };
 
@@ -147,7 +147,7 @@ export const ComplaintTriagePanel = React.memo(function ComplaintTriagePanel() {
               {/* Explicit triage actions — unambiguous operator controls */}
               <div className="flex items-center gap-2 mt-2">
                 <button
-                  onClick={() => handleTriage(complaint.complaintId, 'UNDER_INVESTIGATION')}
+                  onClick={() => handleTriage(complaint.complaintId, 'ESCALATED')}
                   disabled={isTriaging}
                   className="flex items-center gap-1 px-2.5 py-1 text-[10px] rounded
                              bg-accent-amber/10 border border-accent-amber/30 text-amber-400

@@ -6,8 +6,8 @@ export type AlertSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type AlertStatus   = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
 export type ComplaintStatus =
   | 'PENDING_VERIFICATION'
-  | 'UNDER_INVESTIGATION'
-  | 'RESOLVED'
+  | 'VERIFIED'
+  | 'ESCALATED'
   | 'REJECTED';
 
 // ── SystemAlert ──────────────────────────────────────────────
