@@ -1,0 +1,19 @@
+-- Raise Zone 1's risk_multiplier from 1.0 to 3.0 for demo purposes.
+--
+-- Finding: with risk_multiplier=1.0, the anomaly score's hard 1.0 ceiling
+-- (from AnomalyDetectionEngine's Math.min(1.0, ...) clamp) means
+-- priorityScore = score * 1.0 <= 1.0, which ALWAYS falls in the LOW
+-- severity band (< 1.0 threshold for MEDIUM). This made every demo-triggered
+-- alert structurally capped at LOW regardless of the underlying model's
+-- actual confidence — MEDIUM/HIGH/CRITICAL were mathematically unreachable.
+--
+-- With risk_multiplier=3.0, a typical ONNX score of ~0.64 produces
+-- priorityScore = 0.64 * 3.0 = 1.92 -> MEDIUM severity, and the fallback
+-- engine's max ~0.98 produces 0.98 * 3.0 = 2.94 -> HIGH severity.
+-- CRITICAL (>= 4.0) remains rare but possible at extreme scores.
+--
+-- This is a demo-environment tuning choice to show a realistic range of
+-- alert severities, NOT a claim about real-world risk calibration for this
+-- zone. In production, risk_multiplier would be set per-zone based on actual
+-- grid topology, load density, and historical incident data.
+UPDATE grid_zones SET risk_multiplier = 3.0 WHERE zone_id = 1;
