@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { Send, CheckCircle, AlertCircle, Loader2, MapPin } from 'lucide-react';
+import { Send, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import client from '../api/client';
 import type { ComplaintSubmitResponse } from '../types';
 
@@ -24,7 +24,6 @@ function useDebounce<T>(value: T, delay: number): T {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setDebounced(v), delay);
   }, [delay]);
-  // Trigger debounce on value change
   React.useEffect(() => { update(value); }, [value, update]);
   return debounced;
 }
@@ -33,13 +32,13 @@ function useDebounce<T>(value: T, delay: number): T {
 function validate(form: FormState): Record<string, string> {
   const errors: Record<string, string> = {};
   if (form.incidentAddress.trim().length < 10) {
-    errors.incidentAddress = 'Address must be at least 10 characters';
+    errors.incidentAddress = 'Please provide a full address (at least 10 characters)';
   }
   if (form.description.trim().length < 20) {
-    errors.description = 'Description must be at least 20 characters';
+    errors.description = 'Please describe the issue in more detail (at least 20 characters)';
   }
   if (!form.zoneId) {
-    errors.zoneId = 'Please select a zone';
+    errors.zoneId = 'Please select which grid zone the incident is in';
   }
   return errors;
 }
@@ -51,7 +50,6 @@ export const ComplaintSubmissionForm = React.memo(function ComplaintSubmissionFo
   const [submitStatus, setStatus] = useState<SubmitStatus>('idle');
   const [responseMsg, setMsg]   = useState('');
 
-  // Debounce validation — 175ms after user stops typing
   const debouncedForm = useDebounce(form, 175);
   const errors        = React.useMemo(() => validate(debouncedForm), [debouncedForm]);
   const isValid       = Object.keys(errors).length === 0;
@@ -85,7 +83,7 @@ export const ComplaintSubmissionForm = React.memo(function ComplaintSubmissionFo
         setMsg(res.data.message);
       } else {
         setStatus('success');
-        setMsg(`Complaint #${res.data.complaintId ?? 'submitted'} — pending verification`);
+        setMsg(`Your report has been submitted (reference #${res.data.complaintId ?? '—'}). A grid operator will review it within 24 hours.`);
         setForm({ incidentAddress: '', description: '', zoneId: '' });
         setTouched({});
       }
@@ -93,47 +91,49 @@ export const ComplaintSubmissionForm = React.memo(function ComplaintSubmissionFo
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 429) {
         setStatus('rate_limited');
-        setMsg('Rate limit reached. Please wait before submitting again.');
+        setMsg('You\'ve submitted too many reports recently. Please wait a few minutes before trying again.');
       } else {
         setStatus('error');
-        setMsg('Submission failed. Please try again.');
+        setMsg('Something went wrong submitting your report. Please try again.');
       }
     }
   }, [form, isValid]);
 
-  const fieldClass = (name: keyof FormState) => `
-    w-full bg-grid-raised border rounded px-3 py-2 text-sm text-white placeholder:text-grid-muted
-    focus:outline-none focus:ring-1 transition-colors font-sans
-    ${touched[name] && errors[name]
-      ? 'border-accent-red focus:ring-accent-red/50'
-      : 'border-grid-border focus:ring-accent-blue/50 focus:border-accent-blue'}
+  const inputBase = `
+    w-full bg-grid-raised/50 border border-grid-border rounded-[10px]
+    px-4 py-3 text-[15px] text-grid-text placeholder:text-grid-dim
+    focus:outline-none focus:ring-2 focus:border-accent-amber/50
+    focus:ring-accent-amber/20 transition-all
   `;
 
+  const fieldClass = (name: keyof FormState) =>
+    `${inputBase} ${touched[name] && errors[name] ? 'border-accent-red focus:ring-accent-red/20 focus:border-accent-red/50' : ''}`;
+
   return (
-    <div className="rounded-lg border border-grid-border bg-grid-surface p-6 max-w-lg mx-auto">
-      <div className="flex items-center gap-2 mb-5">
-        <MapPin className="w-4 h-4 text-accent-blue" />
-        <h2 className="text-sm font-semibold text-white">Report a Grid Incident</h2>
-      </div>
+    <div className="bg-grid-surface border border-grid-border rounded-[16px] p-6 sm:p-8">
 
-      {/* Success / error banners */}
+      {/* Success banner */}
       {submitStatus === 'success' && (
-        <div className="flex items-start gap-2 p-3 mb-4 rounded bg-accent-green/10 border border-accent-green/30 text-accent-green text-xs animate-fade-in">
-          <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{responseMsg}</span>
-        </div>
-      )}
-      {(submitStatus === 'error' || submitStatus === 'rate_limited') && (
-        <div className="flex items-start gap-2 p-3 mb-4 rounded bg-accent-orange/10 border border-accent-orange/30 text-orange-400 text-xs animate-fade-in">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{responseMsg}</span>
+        <div className="flex items-start gap-3 p-4 mb-6 rounded-[10px] bg-accent-green/8 border border-accent-green/20 animate-fade-in">
+          <CheckCircle className="w-5 h-5 text-accent-green shrink-0 mt-0.5" />
+          <p className="text-[14px] text-accent-green leading-relaxed">{responseMsg}</p>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+      {/* Error/rate-limit banner */}
+      {(submitStatus === 'error' || submitStatus === 'rate_limited') && (
+        <div className="flex items-start gap-3 p-4 mb-6 rounded-[10px] bg-accent-red/8 border border-accent-red/20 animate-fade-in">
+          <AlertCircle className="w-5 h-5 text-accent-red shrink-0 mt-0.5" />
+          <p className="text-[14px] text-accent-red leading-relaxed">{responseMsg}</p>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
         {/* Zone selector */}
         <div>
-          <label className="block text-xs text-grid-muted mb-1.5">Grid Zone *</label>
+          <label className="block text-[13px] text-grid-muted mb-2 font-medium">
+            Grid Zone
+          </label>
           <select
             name="zoneId"
             value={form.zoneId}
@@ -141,60 +141,64 @@ export const ComplaintSubmissionForm = React.memo(function ComplaintSubmissionFo
             onBlur={handleBlur}
             className={fieldClass('zoneId')}
           >
-            <option value="">Select zone…</option>
+            <option value="">Select the zone where the issue occurred…</option>
             {ZONES.map((z) => <option key={z} value={z}>Zone {z}</option>)}
           </select>
           {touched.zoneId && errors.zoneId && (
-            <p className="text-[10px] text-accent-red mt-1">{errors.zoneId}</p>
+            <p className="text-[12px] text-accent-red mt-1.5 ml-1">{errors.zoneId}</p>
           )}
         </div>
 
         {/* Address */}
         <div>
-          <label className="block text-xs text-grid-muted mb-1.5">Incident Address *</label>
+          <label className="block text-[13px] text-grid-muted mb-2 font-medium">
+            Incident Location
+          </label>
           <input
             type="text"
             name="incidentAddress"
             value={form.incidentAddress}
             onChange={handleChange}
             onBlur={handleBlur}
-            placeholder="e.g. 45 Grid Street, Sector 7"
+            placeholder="Street address or nearest landmark"
             className={fieldClass('incidentAddress')}
           />
           {touched.incidentAddress && errors.incidentAddress && (
-            <p className="text-[10px] text-accent-red mt-1">{errors.incidentAddress}</p>
+            <p className="text-[12px] text-accent-red mt-1.5 ml-1">{errors.incidentAddress}</p>
           )}
-          <p className="text-[10px] text-grid-muted mt-1">{form.incidentAddress.length}/10 min chars</p>
         </div>
 
         {/* Description */}
         <div>
-          <label className="block text-xs text-grid-muted mb-1.5">Incident Description *</label>
+          <label className="block text-[13px] text-grid-muted mb-2 font-medium">
+            What happened?
+          </label>
           <textarea
             name="description"
             value={form.description}
             onChange={handleChange}
             onBlur={handleBlur}
-            rows={4}
-            placeholder="Describe the incident clearly — power outage, flickering, equipment damage…"
+            rows={5}
+            placeholder="Describe what you observed — power outage, flickering lights, visible damage to equipment, unusual sounds…"
             className={`${fieldClass('description')} resize-none`}
           />
           {touched.description && errors.description && (
-            <p className="text-[10px] text-accent-red mt-1">{errors.description}</p>
+            <p className="text-[12px] text-accent-red mt-1.5 ml-1">{errors.description}</p>
           )}
-          <p className="text-[10px] text-grid-muted mt-1">{form.description.length}/20 min chars</p>
         </div>
 
+        {/* Submit button — amber accent, generous size */}
         <button
           type="submit"
           disabled={submitStatus === 'submitting'}
-          className="flex items-center justify-center gap-2 w-full py-2.5 rounded
-                     bg-accent-blue hover:bg-blue-500 text-white text-sm font-medium
+          className="flex items-center justify-center gap-2.5 w-full py-3.5 mt-2
+                     rounded-[10px] bg-accent-amber hover:bg-amber-500
+                     text-grid-base text-[15px] font-semibold
                      transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {submitStatus === 'submitting'
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
-            : <><Send className="w-4 h-4" /> Submit Report</>
+            ? <><Loader2 className="w-5 h-5 animate-spin" /> Submitting…</>
+            : <><Send className="w-5 h-5" /> Submit Report</>
           }
         </button>
       </form>
