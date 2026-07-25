@@ -3,7 +3,9 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useAlertStore } from '../store/alertStore';
 import { useAuth } from '../auth/AuthContext';
 import { ConnectionStatus } from '../components/ConnectionStatus';
-import { Zap, LogOut, FileWarning, ShieldAlert } from 'lucide-react';
+import { Zap, LogOut, FileWarning, ShieldAlert, Loader2 } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import client from '../api/client';
 import type { SystemAlert, AlertSeverity } from '../types';
 
 // ── Severity config ──────────────────────────────────────────
@@ -36,33 +38,33 @@ function StatusRibbon() {
   const open = alerts.filter((a) => a.status === 'OPEN').length;
 
   return (
-    <div className="flex items-center gap-0 border-b border-grid-border-subtle bg-grid-surface text-xs font-mono h-9 shrink-0 overflow-x-auto">
+    <div className="flex items-center gap-0 border-b border-grid-border-subtle bg-grid-surface text-xs font-mono h-8 shrink-0 overflow-x-auto">
       <RibbonCell label="TOTAL" value={total} color="text-grid-text" />
       <RibbonDivider />
-      <RibbonCell label="CRITICAL" value={critical} color="text-severity-critical" pulse={critical > 0} />
+      <RibbonCell label="CRIT" value={critical} color="text-severity-critical" pulse={critical > 0} />
       <RibbonDivider />
       <RibbonCell label="HIGH" value={high} color="text-severity-high" />
       <RibbonDivider />
-      <RibbonCell label="MEDIUM" value={medium} color="text-severity-medium" />
+      <RibbonCell label="MED" value={medium} color="text-severity-medium" />
       <RibbonDivider />
       <RibbonCell label="OPEN" value={open} color="text-accent-cyan" />
       <RibbonDivider />
-      <RibbonCell label="METERS" value={new Set(alerts.map((a) => a.meterId)).size} color="text-grid-muted" />
+      <RibbonCell label="MTRS" value={new Set(alerts.map((a) => a.meterId)).size} color="text-grid-muted" />
     </div>
   );
 }
 
 function RibbonCell({ label, value, color, pulse }: { label: string; value: number; color: string; pulse?: boolean }) {
   return (
-    <div className="flex items-center gap-2 px-4 h-full">
-      <span className="text-grid-dim text-[10px] tracking-widest">{label}</span>
-      <span className={`font-bold text-sm ${color} ${pulse ? 'animate-pulse-soft' : ''}`}>{value}</span>
+    <div className="flex items-center gap-1.5 px-2.5 h-full">
+      <span className="text-grid-dim text-[9px] tracking-wider">{label}</span>
+      <span className={`font-bold text-[13px] ${color} ${pulse ? 'animate-pulse-soft' : ''}`}>{value}</span>
     </div>
   );
 }
 
 function RibbonDivider() {
-  return <div className="w-px h-4 bg-grid-border-subtle shrink-0" />;
+  return <div className="w-px h-3 bg-grid-border-subtle shrink-0" />;
 }
 
 // ── Alert Row ────────────────────────────────────────────────
@@ -107,6 +109,47 @@ function AlertRow({ alert, onAck }: { alert: SystemAlert; onAck: (id: number) =>
           <span className="text-[9px] text-accent-cyan">ACK'd</span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Demo Trigger Button ───────────────────────────────────────
+function DemoTriggerButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const { user } = useAuth();
+  const canSimulate = user?.roles?.some((r) =>
+    r === 'OPERATOR' || r === 'ADMIN' || r === 'ROLE_OPERATOR' || r === 'ROLE_ADMIN'
+  );
+
+  const handleClick = useCallback(async () => {
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await client.post<{ count: number }>('/demo/simulate-telemetry');
+      setResult(`${res.data.count} readings submitted`);
+      setTimeout(() => setResult(null), 4000);
+    } catch {
+      setResult('Failed');
+      setTimeout(() => setResult(null), 3000);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  if (!canSimulate) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={handleClick}
+        disabled={loading}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-mono tracking-wide rounded-[3px] bg-accent-blue/15 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/25 transition-colors disabled:opacity-50"
+      >
+        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+        SIMULATE
+      </button>
+      {result && <span className="text-[10px] font-mono text-accent-green">{result}</span>}
     </div>
   );
 }
@@ -194,7 +237,7 @@ export default function Dashboard() {
           {/* Alert rows */}
           <div className="flex-1 overflow-y-auto">
             {sortedAlerts.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-grid-dim text-xs font-mono">
+              <div className="h-24 flex items-center justify-center text-grid-dim text-xs font-mono">
                 Awaiting live alerts…
               </div>
             ) : (
@@ -218,7 +261,7 @@ export default function Dashboard() {
           </div>
           <div className="h-[100px] px-3 flex flex-col justify-center border-t border-grid-border-subtle">
             <span className="text-[10px] font-mono text-grid-dim tracking-widest mb-2">PIPELINE DEMO</span>
-            <span className="text-xs text-grid-dim font-mono">Demo trigger renders here</span>
+            <DemoTriggerButton />
           </div>
         </div>
       </div>
