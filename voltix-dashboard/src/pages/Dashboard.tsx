@@ -2,16 +2,122 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAlertStore } from '../store/alertStore';
 import { useAuth } from '../auth/AuthContext';
-import { AlertsFeed } from '../components/AlertsFeed';
-import { GridMetricsEngine } from '../components/GridMetricsEngine';
-import { ComplaintTriagePanel } from '../components/ComplaintTriagePanel';
 import { ConnectionStatus } from '../components/ConnectionStatus';
-import { ErrorBoundary } from '../components/ErrorBoundary';
-import { Zap, LayoutDashboard, LogOut, UserCircle, FileWarning } from 'lucide-react';
+import { Zap, LogOut, FileWarning, ShieldAlert } from 'lucide-react';
+import type { SystemAlert, AlertSeverity } from '../types';
 
+// ── Severity config ──────────────────────────────────────────
+const SEV_COLOR: Record<AlertSeverity, string> = {
+  LOW:      'bg-grid-dim',
+  MEDIUM:   'bg-severity-medium',
+  HIGH:     'bg-severity-high',
+  CRITICAL: 'bg-severity-critical',
+};
+const SEV_TEXT: Record<AlertSeverity, string> = {
+  LOW:      'text-grid-muted',
+  MEDIUM:   'text-severity-medium',
+  HIGH:     'text-severity-high',
+  CRITICAL: 'text-severity-critical',
+};
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch { return '—'; }
+}
+
+// ── Status Ribbon ────────────────────────────────────────────
+function StatusRibbon() {
+  const alerts = useAlertStore((s) => s.alerts);
+  const total = alerts.length;
+  const critical = alerts.filter((a) => a.severity === 'CRITICAL').length;
+  const high = alerts.filter((a) => a.severity === 'HIGH').length;
+  const medium = alerts.filter((a) => a.severity === 'MEDIUM').length;
+  const open = alerts.filter((a) => a.status === 'OPEN').length;
+
+  return (
+    <div className="flex items-center gap-0 border-b border-grid-border-subtle bg-grid-surface text-xs font-mono h-9 shrink-0 overflow-x-auto">
+      <RibbonCell label="TOTAL" value={total} color="text-grid-text" />
+      <RibbonDivider />
+      <RibbonCell label="CRITICAL" value={critical} color="text-severity-critical" pulse={critical > 0} />
+      <RibbonDivider />
+      <RibbonCell label="HIGH" value={high} color="text-severity-high" />
+      <RibbonDivider />
+      <RibbonCell label="MEDIUM" value={medium} color="text-severity-medium" />
+      <RibbonDivider />
+      <RibbonCell label="OPEN" value={open} color="text-accent-cyan" />
+      <RibbonDivider />
+      <RibbonCell label="METERS" value={new Set(alerts.map((a) => a.meterId)).size} color="text-grid-muted" />
+    </div>
+  );
+}
+
+function RibbonCell({ label, value, color, pulse }: { label: string; value: number; color: string; pulse?: boolean }) {
+  return (
+    <div className="flex items-center gap-2 px-4 h-full">
+      <span className="text-grid-dim text-[10px] tracking-widest">{label}</span>
+      <span className={`font-bold text-sm ${color} ${pulse ? 'animate-pulse-soft' : ''}`}>{value}</span>
+    </div>
+  );
+}
+
+function RibbonDivider() {
+  return <div className="w-px h-4 bg-grid-border-subtle shrink-0" />;
+}
+
+// ── Alert Row ────────────────────────────────────────────────
+function AlertRow({ alert, onAck }: { alert: SystemAlert; onAck: (id: number) => void }) {
+  return (
+    <div className={`flex items-center h-8 border-b border-grid-border-subtle hover:bg-grid-raised/50 transition-colors text-xs font-mono ${alert.severity === 'CRITICAL' ? 'animate-pulse-critical' : ''}`}>
+      {/* Severity strip */}
+      <div className={`w-[3px] h-full ${SEV_COLOR[alert.severity]} shrink-0`} />
+
+      {/* Severity label */}
+      <span className={`w-[72px] px-2 text-[10px] font-semibold tracking-wider ${SEV_TEXT[alert.severity]}`}>
+        {alert.severity}
+      </span>
+
+      {/* Meter ID */}
+      <span className="w-[64px] text-grid-text">{alert.meterId}</span>
+
+      {/* Zone */}
+      <span className="w-[56px] text-grid-dim">Z{alert.zoneId}</span>
+
+      {/* Score */}
+      <span className={`w-[56px] ${SEV_TEXT[alert.severity]}`}>
+        {Number(alert.priorityScore).toFixed(2)}
+      </span>
+
+      {/* Type */}
+      <span className="flex-1 text-grid-dim truncate">{alert.alertType.replace(/_/g, ' ')}</span>
+
+      {/* Timestamp */}
+      <span className="w-[72px] text-right text-grid-dim">{formatTime(alert.detectedAt)}</span>
+
+      {/* ACK button */}
+      <div className="w-[48px] flex justify-center">
+        {alert.status === 'OPEN' ? (
+          <button
+            onClick={() => onAck(alert.alertId)}
+            className="text-[9px] px-1.5 py-0.5 rounded border border-grid-border text-grid-muted hover:text-accent-cyan hover:border-accent-cyan transition-colors"
+          >
+            ACK
+          </button>
+        ) : (
+          <span className="text-[9px] text-accent-cyan">ACK'd</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ────────────────────────────────────────────────
 export default function Dashboard() {
   const { status, reconnectAttempts } = useWebSocket();
+  const alerts = useAlertStore((s) => s.alerts);
+  const markAcknowledged = useAlertStore((s) => s.markAcknowledged);
   const unreadCount = useAlertStore((s) => s.unreadCount);
+  const clearAlerts = useAlertStore((s) => s.clearAlerts);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -20,96 +126,102 @@ export default function Dashboard() {
     navigate('/login', { replace: true });
   };
 
-  return (
-    <div className="min-h-screen bg-grid-base flex flex-col">
+  // Sort: CRITICAL first, then by detected time
+  const sortedAlerts = [...alerts].sort((a, b) => {
+    const order: Record<AlertSeverity, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+    const sevDiff = order[a.severity] - order[b.severity];
+    if (sevDiff !== 0) return sevDiff;
+    return new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime();
+  });
 
-      {/* ── Top Navigation Bar ── */}
-      <header className="h-12 border-b border-grid-border bg-grid-surface flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-2">
-          <Zap className="w-5 h-5 text-accent-amber" />
-          <span className="font-semibold text-sm text-white tracking-wide">VoltiX</span>
-          <span className="text-grid-muted text-xs">/ Grid Command Center</span>
-          <nav className="ml-4 flex items-center gap-3">
-            <Link to="/" className="text-xs text-white font-medium flex items-center gap-1">
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              Dashboard
-            </Link>
-            <Link to="/report" className="text-xs text-grid-muted hover:text-white transition-colors flex items-center gap-1">
-              <FileWarning className="w-3.5 h-3.5" />
-              Report Incident
-            </Link>
-          </nav>
+  return (
+    <div className="h-screen bg-grid-base flex flex-col overflow-hidden">
+
+      {/* ── Header Bar ── */}
+      <header className="h-10 border-b border-grid-border bg-grid-surface flex items-center justify-between px-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <Zap className="w-4 h-4 text-accent-amber" />
+          <span className="font-semibold text-sm text-grid-text tracking-wide">VOLTIX</span>
+          <span className="text-grid-dim text-[10px] font-mono tracking-widest">GRID COMMAND</span>
+          <Link to="/report" className="ml-4 text-[10px] text-grid-muted hover:text-grid-text transition-colors flex items-center gap-1 font-mono tracking-wide">
+            <FileWarning className="w-3 h-3" />
+            REPORT
+          </Link>
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Unread alert badge */}
-          {unreadCount > 0 && (
-            <span className="flex items-center gap-1 text-xs font-mono text-accent-red">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent-red animate-pulse" />
-              {unreadCount} alert{unreadCount !== 1 ? 's' : ''}
-            </span>
-          )}
           <ConnectionStatus status={status} reconnectAttempts={reconnectAttempts} />
-
-          {/* Logged-in identity — read from real JWT claims */}
           {user && (
-            <span className="flex items-center gap-1.5 text-xs text-grid-muted" title={`Tenant ${user.tenantId ?? '—'}`}>
-              <UserCircle className="w-4 h-4 text-accent-blue" />
-              <span className="font-mono text-white">{user.username}</span>
-              {user.roles.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded bg-accent-blue/15 text-accent-blue text-[10px] font-mono uppercase tracking-wide">
-                  {user.roles.join(', ')}
-                </span>
-              )}
+            <span className="text-[10px] font-mono text-grid-muted">
+              <span className="text-grid-text">{user.username}</span>
+              <span className="ml-1 text-accent-cyan">{user.roles[0]}</span>
             </span>
           )}
-
-          {/* Logout */}
           <button
             onClick={handleLogout}
             aria-label="Log out"
-            className="flex items-center gap-1 text-xs text-grid-muted hover:text-accent-red transition-colors"
+            className="text-grid-dim hover:text-accent-red transition-colors"
           >
             <LogOut className="w-3.5 h-3.5" />
-            Logout
           </button>
         </div>
       </header>
 
-      {/* ── Main Dashboard Grid ── */}
-      <main className="flex-1 grid grid-cols-12 gap-4 p-4 overflow-hidden">
+      {/* ── Status Ribbon ── */}
+      <StatusRibbon />
 
-        {/* Left column — Metrics + Alerts (8/12) */}
-        <div className="col-span-12 lg:col-span-8 flex flex-col gap-4 min-h-0">
+      {/* ── Main Content: Alert Feed + Right Panel ── */}
+      <div className="flex-1 flex min-h-0">
 
+        {/* ALERT FEED — left, dominant */}
+        <div className="flex-1 flex flex-col min-w-0 border-r border-grid-border-subtle">
           {/* Section label */}
-          <div className="flex items-center gap-2">
-            <LayoutDashboard className="w-3.5 h-3.5 text-grid-muted" />
-            <h1 className="text-xs font-semibold text-grid-muted uppercase tracking-wider">
-              Anomaly & Security Center
-            </h1>
+          <div className="flex items-center justify-between h-7 px-3 border-b border-grid-border-subtle bg-grid-base">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-3 h-3 text-grid-dim" />
+              <span className="text-[10px] font-mono text-grid-dim tracking-widest">ALERT FEED</span>
+              {unreadCount > 0 && (
+                <span className="text-[10px] font-mono text-accent-red">{unreadCount} new</span>
+              )}
+            </div>
+            {alerts.length > 0 && (
+              <button onClick={clearAlerts} className="text-[9px] font-mono text-grid-dim hover:text-grid-muted transition-colors">
+                CLEAR
+              </button>
+            )}
           </div>
 
-          {/* Grid metrics charts */}
-          <ErrorBoundary panelName="Grid Metrics Engine">
-            <GridMetricsEngine />
-          </ErrorBoundary>
-
-          {/* Live alerts feed */}
-          <div className="flex-1 min-h-0">
-            <ErrorBoundary panelName="Live Alerts Feed">
-              <AlertsFeed />
-            </ErrorBoundary>
+          {/* Alert rows */}
+          <div className="flex-1 overflow-y-auto">
+            {sortedAlerts.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-grid-dim text-xs font-mono">
+                Awaiting live alerts…
+              </div>
+            ) : (
+              sortedAlerts.map((alert) => (
+                <AlertRow key={alert.alertId} alert={alert} onAck={markAcknowledged} />
+              ))
+            )}
           </div>
         </div>
 
-        {/* Right column — Triage (4/12) */}
-        <div className="col-span-12 lg:col-span-4 min-h-0">
-          <ErrorBoundary panelName="Complaint Triage">
-            <ComplaintTriagePanel />
-          </ErrorBoundary>
+        {/* RIGHT PANEL — Complaints + Demo Trigger */}
+        <div className="w-[340px] shrink-0 flex flex-col min-h-0 bg-grid-base">
+          {/* Placeholder sections — will be filled with real components next */}
+          <div className="flex-1 border-b border-grid-border-subtle flex flex-col">
+            <div className="h-7 px-3 flex items-center border-b border-grid-border-subtle">
+              <span className="text-[10px] font-mono text-grid-dim tracking-widest">COMPLAINT QUEUE</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              <span className="text-xs text-grid-dim font-mono">Complaint triage panel renders here</span>
+            </div>
+          </div>
+          <div className="h-[100px] px-3 flex flex-col justify-center border-t border-grid-border-subtle">
+            <span className="text-[10px] font-mono text-grid-dim tracking-widest mb-2">PIPELINE DEMO</span>
+            <span className="text-xs text-grid-dim font-mono">Demo trigger renders here</span>
+          </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
