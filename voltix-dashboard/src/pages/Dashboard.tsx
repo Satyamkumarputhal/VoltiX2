@@ -148,7 +148,9 @@ export default function Dashboard() {
 
   const total = alerts.length;
   const critical = alerts.filter((a) => a.severity === 'CRITICAL').length;
+  const high = alerts.filter((a) => a.severity === 'HIGH').length;
   const medium = alerts.filter((a) => a.severity === 'MEDIUM').length;
+  const open = alerts.filter((a) => a.status === 'OPEN').length;
   const meters = new Set(alerts.map((a) => a.meterId)).size;
 
   return (
@@ -184,10 +186,12 @@ export default function Dashboard() {
       <div className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
 
         {/* ── Stat Cards Row ── */}
-        <div className="grid grid-cols-4 gap-3 shrink-0">
+        <div className="grid grid-cols-6 gap-3 shrink-0">
           <StatCard label="TOTAL" value={total} color="text-grid-text" />
           <StatCard label="CRITICAL" value={critical} color="text-severity-critical" />
+          <StatCard label="HIGH" value={high} color="text-severity-high" />
           <StatCard label="MEDIUM" value={medium} color="text-severity-medium" />
+          <StatCard label="OPEN" value={open} color="text-accent-cyan" />
           <StatCard label="METERS" value={meters} color="text-grid-text" />
         </div>
 
