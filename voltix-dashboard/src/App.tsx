@@ -34,11 +34,7 @@ export default function App() {
             />
             <Route
               path="/report"
-              element={
-                <ProtectedRoute>
-                  <PublicSubmit />
-                </ProtectedRoute>
-              }
+              element={<PublicSubmit />}
             />
           </Routes>
         </Suspense>
