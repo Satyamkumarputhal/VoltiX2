@@ -7,6 +7,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 const Dashboard   = lazy(() => import('./pages/Dashboard'));
 const PublicSubmit = lazy(() => import('./pages/PublicSubmit'));
 const Login       = lazy(() => import('./pages/Login'));
+const DesignPreview = lazy(() => import('./pages/DesignPreview'));
 
 function LoadingFallback() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
               path="/report"
               element={<PublicSubmit />}
             />
+            <Route path="/design" element={<DesignPreview />} />
           </Routes>
         </Suspense>
       </AuthProvider>
