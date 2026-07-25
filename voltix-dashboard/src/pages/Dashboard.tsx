@@ -228,10 +228,10 @@ export default function Dashboard() {
       <StatusRibbon />
 
       {/* ── Main Content ── */}
-      <div className="flex-1 flex gap-2 p-2 min-h-0">
+      <div className="flex gap-2 p-2 min-h-0">
 
         {/* LEFT: Alert Feed Panel */}
-        <Panel className="flex-1 flex flex-col min-w-0">
+        <Panel className="flex-1 flex flex-col min-w-0 max-h-[65vh]">
           <PanelHeader
             icon={<ShieldAlert className="w-3 h-3 text-grid-dim" />}
             label="ALERT FEED"
@@ -279,7 +279,7 @@ export default function Dashboard() {
         <div className="w-[380px] shrink-0 flex flex-col gap-2 min-h-0">
 
           {/* Complaint Queue Panel */}
-          <Panel className="flex-1 flex flex-col min-h-0">
+          <Panel className="flex-1 flex flex-col min-h-0 max-h-[55vh]">
             <PanelHeader
               icon={<ClipboardCheck className="w-3 h-3 text-grid-dim" />}
               label="COMPLAINT QUEUE"
@@ -306,6 +306,21 @@ export default function Dashboard() {
           </Panel>
         </div>
       </div>
+
+      {/* ── System Status Footer ── */}
+      <footer className="shrink-0 h-8 border-t border-grid-border bg-grid-surface flex items-center justify-between px-4 text-[10px] font-mono text-grid-dim">
+        <div className="flex items-center gap-4">
+          <span>VoltiX Grid Monitor v0.1</span>
+          <span className="text-grid-border">│</span>
+          <span>Zone 1 — risk ×3.0</span>
+          <span className="text-grid-border">│</span>
+          <span>ONNX Isolation Forest (contamination=0.05)</span>
+        </div>
+        <div className="flex items-center gap-4">
+          <span>WS: <span className={status === 'CONNECTED' ? 'text-accent-green' : 'text-accent-red'}>{status}</span></span>
+          <span>{alerts.length} alerts in feed</span>
+        </div>
+      </footer>
     </div>
   );
 }
