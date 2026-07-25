@@ -27,14 +27,14 @@ interface TriageAction {
 export const ComplaintTriagePanel = React.memo(function ComplaintTriagePanel() {
   const [complaints, setComplaints]     = useState<PublicComplaint[]>([]);
   const [loading, setLoading]           = useState(true);
+  const [initialLoad, setInitialLoad]   = useState(true);
   const [error, setError]               = useState<string | null>(null);
   const [triaging, setTriaging]         = useState<Record<number, TriageAction['status']>>({});
 
   const fetchComplaints = useCallback(async () => {
-    setLoading(true);
+    if (initialLoad) setLoading(true);
     setError(null);
     try {
-      // Backend endpoint — operator-authenticated
       const res = await client.get<PublicComplaint[]>('/complaints', {
         params: { status: 'PENDING_VERIFICATION' },
       });
@@ -44,10 +44,17 @@ export const ComplaintTriagePanel = React.memo(function ComplaintTriagePanel() {
       setError(msg ?? 'Failed to load complaints. Check authentication.');
     } finally {
       setLoading(false);
+      setInitialLoad(false);
     }
-  }, []);
+  }, [initialLoad]);
 
-  useEffect(() => { fetchComplaints(); }, [fetchComplaints]);
+  useEffect(() => {
+    fetchComplaints();
+    // Poll every 15s for new complaints — no WebSocket channel exists for
+    // complaints (only alerts use STOMP), so polling is the pragmatic choice.
+    const interval = setInterval(fetchComplaints, 15_000);
+    return () => clearInterval(interval);
+  }, [fetchComplaints]);
 
   const handleTriage = useCallback(
     async (complaintId: number, newStatus: ComplaintStatus) => {
