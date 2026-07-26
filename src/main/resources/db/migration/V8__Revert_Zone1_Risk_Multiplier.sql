@@ -1,0 +1,11 @@
+-- Revert Zone 1's risk_multiplier back to neutral 1.0.
+--
+-- V7 raised it to 3.0 as a workaround to push priorityScore into the MEDIUM
+-- severity band when severity was determined from priorityScore (score × multiplier).
+-- Now that severity is determined from continuousScore ALONE (decoupled from
+-- risk_multiplier), the artificial inflation is no longer needed or correct.
+--
+-- risk_multiplier's role going forward: affects priorityScore for
+-- ranking/sorting alerts within the feed (higher-risk zones get priority in
+-- the queue), but does NOT affect severity classification.
+UPDATE grid_zones SET risk_multiplier = 1.0 WHERE zone_id = 1;

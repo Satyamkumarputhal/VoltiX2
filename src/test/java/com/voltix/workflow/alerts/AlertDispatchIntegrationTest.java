@@ -73,8 +73,9 @@ class AlertDispatchIntegrationTest {
         BigDecimal expectedPriorityScore = BigDecimal.valueOf(2.125).setScale(4, RoundingMode.HALF_UP);
         assertEquals(expectedPriorityScore, alert.getPriorityScore());
 
-        // Priority Score is 2.1250 which is between 1.0 and 2.5, so severity should be MEDIUM
-        assertEquals(AlertSeverity.MEDIUM, alert.getSeverity());
+        // Severity is now determined from continuousScore (0.85) alone, not priorityScore.
+        // continuousScore 0.85 >= 0.63 threshold → CRITICAL
+        assertEquals(AlertSeverity.CRITICAL, alert.getSeverity());
         assertEquals(AlertStatus.OPEN, alert.getStatus());
 
         // Verify stored in DB (scoped to this test's own meter, since other
