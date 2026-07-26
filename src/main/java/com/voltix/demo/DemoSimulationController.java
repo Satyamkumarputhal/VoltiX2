@@ -79,18 +79,51 @@ public class DemoSimulationController {
             packet.setRecordedAt(now.minusSeconds(batchSize - i)); // stagger timestamps
 
             if (i == anomalyIndex) {
-                // Anomalous pattern: zero-current-under-load (high power, near-zero
-                // current — the same pattern used in the ML validation work).
-                // Empirically verified against the model's REAL, unmodified predict()
-                // label to trigger 100% of the time across independent seeds.
-                double voltage = rng.nextDouble(220.0, 240.0);
-                double current = Math.abs(gaussian(rng, 0.005, 0.003));
-                double kwConsumed = rng.nextDouble(7.0, 9.0);
-                packet.setVoltage(voltage);
-                packet.setCurrent(current);
-                packet.setKwConsumed(kwConsumed);
-                log.info("[DEMO] Generating ANOMALOUS reading (zero-current-under-load) for meter={}",
-                        packet.getMeterId());
+                // Randomly select from 3 validated anomaly patterns that pass the
+                // TelemetryValidator's 200-260V bounds while still reliably triggering
+                // the ONNX model's anomaly detection. Each produces a different score
+                // range within the MEDIUM severity band (priority 1.5-1.95 × risk 3.0).
+                int anomalyType = rng.nextInt(3);
+                String anomalyLabel;
+
+                switch (anomalyType) {
+                    case 0 -> {
+                        // Zero-current-under-load: high power, near-zero current
+                        // Priority range: ~1.75–1.94 (MEDIUM)
+                        double voltage = rng.nextDouble(220.0, 240.0);
+                        double current = Math.abs(gaussian(rng, 0.005, 0.003));
+                        double kwConsumed = rng.nextDouble(7.0, 9.0);
+                        packet.setVoltage(voltage);
+                        packet.setCurrent(current);
+                        packet.setKwConsumed(kwConsumed);
+                        anomalyLabel = "zero-current-under-load";
+                    }
+                    case 1 -> {
+                        // Voltage low-edge: voltage 200-210V (just inside validator
+                        // bounds, but model detects as anomalous 100% of the time)
+                        // Priority range: ~1.56–1.74 (MEDIUM, lower end)
+                        double voltage = rng.nextDouble(200.0, 210.0);
+                        double current = rng.nextDouble(2.0, 10.0);
+                        double kwConsumed = (voltage * current / 1000.0) + gaussian(rng, 0.0, 0.05);
+                        packet.setVoltage(voltage);
+                        packet.setCurrent(current);
+                        packet.setKwConsumed(Math.max(0.0, kwConsumed));
+                        anomalyLabel = "voltage-low-edge";
+                    }
+                    default -> {
+                        // Power mismatch: normal voltage/current but wildly high power
+                        // (kW far exceeds V*I/1000, indicating meter tampering/bypass)
+                        // Priority range: ~1.67–1.91 (MEDIUM, upper end)
+                        double voltage = rng.nextDouble(225.0, 240.0);
+                        double current = rng.nextDouble(3.0, 8.0);
+                        double kwConsumed = rng.nextDouble(8.0, 14.0); // Real P≈0.7-1.9kW
+                        packet.setVoltage(voltage);
+                        packet.setCurrent(current);
+                        packet.setKwConsumed(kwConsumed);
+                        anomalyLabel = "power-mismatch";
+                    }
+                }
+                log.info("[DEMO] Generating ANOMALOUS reading ({}) for meter={}", anomalyLabel, packet.getMeterId());
             } else {
                 // Normal reading — biased toward the model's empirically-verified
                 // safe sub-region of the validated normal band (see class javadoc):
