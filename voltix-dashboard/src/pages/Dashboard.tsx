@@ -271,7 +271,7 @@ export default function Dashboard() {
 
       {/* ── Footer ── */}
       <footer className="shrink-0 h-8 border-t border-grid-border bg-grid-surface flex items-center justify-between px-5 text-[10px] text-grid-dim">
-        <span>VoltiX Grid Monitor v0.1 — Zone 1 risk ×3.0 — ONNX Isolation Forest</span>
+        <span>VoltiX Grid Monitor v0.1 — ONNX Isolation Forest — severity calibrated from model confidence (contamination=0.05)</span>
         <div className="flex items-center gap-3">
           <span>WS: <span className={status === 'CONNECTED' ? 'text-accent-green' : 'text-accent-red'}>{status}</span></span>
           <span>{alerts.length} in feed</span>
