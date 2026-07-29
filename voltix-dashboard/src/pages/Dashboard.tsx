@@ -57,7 +57,7 @@ function AlertRow({ alert, onAck, odd }: { alert: SystemAlert; onAck: (id: numbe
 
       {/* Score */}
       <span className={`w-[70px] text-[13px] font-mono font-semibold ${SEV_TEXT[alert.severity]}`}>
-        {Number(alert.priorityScore).toFixed(2)}
+        {Number(alert.priorityScore).toFixed(3)}
       </span>
 
       {/* Type */}
