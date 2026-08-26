@@ -136,7 +136,7 @@ export default function Dashboard() {
 
   const handleLogout = () => {
     logout();
-    navigate('/login', { replace: true });
+    navigate('/', { replace: true });
   };
 
   const sortedAlerts = [...alerts].sort((a, b) => {

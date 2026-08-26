@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { AuthProvider } from './auth/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
+const Home        = lazy(() => import('./pages/Home'));
 const Dashboard   = lazy(() => import('./pages/Dashboard'));
 const PublicSubmit = lazy(() => import('./pages/PublicSubmit'));
 const Login       = lazy(() => import('./pages/Login'));
@@ -24,19 +25,17 @@ export default function App() {
       <AuthProvider>
         <Suspense fallback={<LoadingFallback />}>
           <Routes>
-            <Route path="/login"  element={<Login />} />
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
             <Route
-              path="/"
+              path="/dashboard"
               element={
                 <ProtectedRoute>
                   <Dashboard />
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/report"
-              element={<PublicSubmit />}
-            />
+            <Route path="/report" element={<PublicSubmit />} />
             <Route path="/design" element={<DesignPreview />} />
           </Routes>
         </Suspense>

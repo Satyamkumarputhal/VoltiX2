@@ -17,7 +17,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const redirectTo = (location.state as LocationState)?.from?.pathname ?? '/';
+  const redirectTo = (location.state as LocationState)?.from?.pathname ?? '/dashboard';
 
   // Already logged in? Skip the login screen.
   if (isAuthenticated) {
