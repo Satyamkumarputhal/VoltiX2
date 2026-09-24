@@ -35,7 +35,7 @@ export function useWebSocket(): UseWebSocketReturn {
 
   const clientRef      = useRef<Client | null>(null);
   const subscriptionRef = useRef<StompSubscription | null>(null);
-  const reconnectTimer  = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer  = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const attemptRef      = useRef(0);
   const unmountedRef    = useRef(false);
 

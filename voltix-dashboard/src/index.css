@@ -31,6 +31,33 @@
   --color-accent-red:     #ef4444;
   --color-accent-cyan:    #22d3ee;
 
+  /* ── Semantic Status Colors — single source of truth ──────────────────── */
+  --color-status-info:     #60a5fa;
+  --color-status-success:  #34d399;
+  --color-status-warning:  #f0b429;
+  --color-status-danger:   #ef4444;
+  --color-status-critical: #ef4444;
+
+  /* ── Severity Scale (aliases to semantic) ────────────────────────────── */
+  --color-severity-low:      var(--color-grid-muted);
+  --color-severity-medium:   var(--color-status-warning);
+  --color-severity-high:     var(--color-status-warning);
+  --color-severity-critical: var(--color-status-critical);
+
+  /* ── Connection States ───────────────────────────────────────────────── */
+  --color-connection-connected:    var(--color-accent-green);
+  --color-connection-connecting:   var(--color-accent-amber);
+  --color-connection-disconnected: var(--color-accent-orange);
+  --color-connection-error:        var(--color-accent-red);
+
+  /* ── Primary Accent: Amber (electrical/grid theming) ─────────────────── */
+  --color-accent-amber:   #f0b429;
+  --color-accent-green:   #34d399;
+  --color-accent-blue:    #60a5fa;
+  --color-accent-orange:  #fb923c;
+  --color-accent-red:     #ef4444;
+  --color-accent-cyan:    #22d3ee;
+
   /* ── Severity Scale — distinct hues, amber = MEDIUM ──────────────────── */
   --color-severity-low:      #8a96a8;
   --color-severity-medium:   #f0b429;
@@ -50,6 +77,42 @@
   /* ── Shadows ─────────────────────────────────────────────────────────── */
   --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-md:  0 3px 8px rgba(0, 0, 0, 0.5);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* ── Spacing Scale ───────────────────────────────────────────────────── */
+  --space-1:  0.25rem;  /* 4px */
+  --space-2:  0.5rem;   /* 8px */
+  --space-3:  0.75rem;  /* 12px */
+  --space-4:  1rem;     /* 16px */
+  --space-5:  1.25rem;  /* 20px */
+  --space-6:  1.5rem;   /* 24px */
+  --space-8:  2rem;     /* 32px */
+
+  /* ── Typography Scale ────────────────────────────────────────────────── */
+  --text-display:  2.25rem;  /* 36px — page titles */
+  --text-h1:       1.5rem;   /* 24px — section headers */
+  --text-h2:       1.25rem;  /* 20px — card titles */
+  --text-body:     1rem;     /* 16px — body text */
+  --text-sm:       0.875rem; /* 14px — secondary */
+  --text-xs:       0.75rem;  /* 12px — labels */
+  --text-xs-mono:  0.6875rem; /* 11px — mono labels/badges */
+
+  /* ── Elevation/Shadows ───────────────────────────────────────────────── */
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.4);
+  --shadow-modal: 0 8px 24px rgba(0,0,0,0.6);
+  --shadow-toast: 0 4px 12px rgba(0,0,0,0.5);
+
+  /* ── Z-Index Scale ───────────────────────────────────────────────────── */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+  --z-tooltip: 500;
+
+  /* ── Transitions ─────────────────────────────────────────────────────── */
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+  --transition-slow: 250ms ease;
 
   /* ── Animations ──────────────────────────────────────────────────────── */
   --animate-slide-in: slideIn 0.2s ease-out;

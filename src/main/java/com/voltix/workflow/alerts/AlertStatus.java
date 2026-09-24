@@ -4,6 +4,7 @@ public enum AlertStatus {
     OPEN,
     ASSIGNED,
     IN_PROGRESS,
+    ACKNOWLEDGED,
     RESOLVED,
     DISMISSED
 }

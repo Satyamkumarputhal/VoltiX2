@@ -3,13 +3,6 @@ import { ClipboardCheck, ChevronUp, X, Loader2, AlertCircle, RefreshCw } from 'l
 import client from '../api/client';
 import type { PublicComplaint, ComplaintStatus } from '../types';
 
-const STATUS_LABELS: Record<ComplaintStatus, string> = {
-  PENDING_VERIFICATION: 'Pending',
-  VERIFIED:             'Verified',
-  ESCALATED:            'Escalated',
-  REJECTED:             'Rejected',
-};
-
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60_000);
@@ -77,7 +70,7 @@ export const ComplaintTriagePanel = React.memo(function ComplaintTriagePanel() {
   );
 
   return (
-    <div className="flex flex-col h-full rounded-lg border border-grid-border bg-grid-surface overflow-hidden">
+    <div className="flex flex-col rounded-lg border border-grid-border bg-grid-surface overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-grid-border">
         <div className="flex items-center gap-2">
@@ -116,7 +109,7 @@ export const ComplaintTriagePanel = React.memo(function ComplaintTriagePanel() {
         )}
 
         {!loading && !error && complaints.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-32 gap-2 text-grid-muted">
+          <div className="flex flex-col items-center justify-center h-20 gap-2 text-grid-muted">
             <ClipboardCheck className="w-6 h-6 opacity-30" />
             <p className="text-xs">No complaints pending verification</p>
           </div>

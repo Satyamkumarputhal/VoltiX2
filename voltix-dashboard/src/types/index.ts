@@ -58,6 +58,23 @@ export interface ZoneAggregate {
   hour:        string;
 }
 
+// ── ZoneForecast ─────────────────────────────────────────────
+// Mirrors the backend GET /api/v1/forecasts response exactly.
+// The backend intentionally omits tenantId (the endpoint is already
+// tenant-scoped by the caller's JWT). Timestamp semantics:
+//   aggregatedHour      = source hour whose actual telemetry was aggregated
+//   forecastTargetHour  = the future hour the forecast predicts (authoritative
+//                         "forecast for" time — never derived as +2h here)
+//   forecastKw2h        = predicted load (kW) for forecastTargetHour
+//   forecastGeneratedAt = when the forecast was generated/persisted
+export interface ZoneForecast {
+  zoneId:              number;
+  aggregatedHour:      string; // ISO-8601
+  forecastTargetHour:  string; // ISO-8601
+  forecastKw2h:        number;
+  forecastGeneratedAt: string; // ISO-8601
+}
+
 // ── API response wrappers ────────────────────────────────────
 export interface ApiError {
   status:  number;

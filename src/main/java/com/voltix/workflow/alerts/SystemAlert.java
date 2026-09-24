@@ -1,12 +1,16 @@
 package com.voltix.workflow.alerts;
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import java.time.ZonedDateTime;
 
 @Entity
 @Table(name = "system_alerts")
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class SystemAlert {
 
     @Id

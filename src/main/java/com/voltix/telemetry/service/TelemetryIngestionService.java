@@ -1,6 +1,7 @@
 package com.voltix.telemetry.service;
 
 import com.voltix.platform.config.VoltixProperties;
+import com.voltix.security.TenantContext;
 import com.voltix.telemetry.dto.TelemetryPacket;
 import com.voltix.telemetry.entity.TelemetryStaging;
 import com.voltix.telemetry.repository.TelemetryStagingRepository;
@@ -42,7 +43,20 @@ public class TelemetryIngestionService {
         validator.validate(packet);
 
         UUID transactionId = packet.getTransactionId() == null ? UUID.randomUUID() : packet.getTransactionId();
-        long tenantId = packet.getTenantId() == null ? properties.getTenant().getDefaultId() : packet.getTenantId();
+
+        // Tenant isolation: derive tenant from authenticated JWT (populated by JwtAuthenticationFilter).
+        // The telemetry endpoint requires authentication, so TenantContext must be populated.
+        Long jwtTenantId = TenantContext.getCurrentTenant();
+        if (jwtTenantId == null) {
+            throw new IllegalStateException("Tenant context not available. Telemetry ingestion requires authenticated request.");
+        }
+        long tenantId = jwtTenantId;
+
+        // If caller provides tenantId, validate it matches the authenticated tenant.
+        if (packet.getTenantId() != null && packet.getTenantId() != tenantId) {
+            throw new IllegalArgumentException("Telemetry tenantId (" + packet.getTenantId() + ") does not match authenticated tenant (" + tenantId + ")");
+        }
+
         long zoneId = packet.getZoneId() == null ? 1L : packet.getZoneId();
 
         TelemetryStaging staging = new TelemetryStaging();

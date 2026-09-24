@@ -1,0 +1,2 @@
+ALTER TABLE system_alerts DROP CONSTRAINT chk_system_alerts_status;
+ALTER TABLE system_alerts ADD CONSTRAINT chk_system_alerts_status CHECK (status IN ('OPEN', 'ASSIGNED', 'IN_PROGRESS', 'ACKNOWLEDGED', 'RESOLVED', 'DISMISSED'));
