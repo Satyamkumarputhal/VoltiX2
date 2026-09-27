@@ -5,6 +5,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -87,7 +89,16 @@ public class AlertController {
             return ResponseEntity.status(401).build();
         }
 
-        SystemAlert updated = alertDispatchService.acknowledgeAlert(id, tenantId);
+        // Get the authenticated username from the JWT token
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication != null ? authentication.getName() : null;
+
+        if (username == null) {
+            log.warn("acknowledgeAlert called with no authenticated user.");
+            return ResponseEntity.status(401).build();
+        }
+
+        SystemAlert updated = alertDispatchService.acknowledgeAlert(id, tenantId, username);
         if (updated == null) {
             log.warn("Alert not found: id={}, tenantId={}", id, tenantId);
             return ResponseEntity.notFound().build();

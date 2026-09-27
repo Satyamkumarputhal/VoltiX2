@@ -1,6 +1,7 @@
 package com.voltix.load;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.voltix.security.TenantContext;
 import com.voltix.telemetry.dto.TelemetryPacket;
 import com.voltix.persistence.MetricsBatchWriter;
 import org.junit.jupiter.api.BeforeEach;
@@ -95,18 +96,21 @@ class ChaosAndLoadIntegrationTest {
     @Test
     @WithMockUser(username = "operator", roles = "OPERATOR")
     void testEndToEndTelemetryIngestAndFallbackProcessing() throws Exception {
-        TelemetryPacket packet = new TelemetryPacket();
-        packet.setMeterId(TEST_METER_ID);
-        packet.setVoltage(230.0);
-        packet.setCurrent(10.0);
-        packet.setKwConsumed(2.3);
-        packet.setRecordedAt(ZonedDateTime.now());
-        packet.setTenantId(TEST_TENANT_ID);
-        packet.setZoneId(TEST_ZONE_ID);
-        packet.setTransactionId(UUID.randomUUID());
+        // Set tenant context for telemetry ingestion (JWT filter sets this in real requests)
+        TenantContext.setCurrentTenant(TEST_TENANT_ID);
+        try {
+            TelemetryPacket packet = new TelemetryPacket();
+            packet.setMeterId(TEST_METER_ID);
+            packet.setVoltage(230.0);
+            packet.setCurrent(10.0);
+            packet.setKwConsumed(2.3);
+            packet.setRecordedAt(ZonedDateTime.now());
+            packet.setTenantId(TEST_TENANT_ID);
+            packet.setZoneId(TEST_ZONE_ID);
+            packet.setTransactionId(UUID.randomUUID());
 
-        // 1. Submit packet via HTTP Ingress
-        mockMvc.perform(post("/api/v1/telemetry/submit")
+            // 1. Submit packet via HTTP Ingress
+            mockMvc.perform(post("/api/v1/telemetry/submit")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(packet)))
                 .andExpect(status().isAccepted());
@@ -132,5 +136,8 @@ class ChaosAndLoadIntegrationTest {
         Integer historyCount = jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM metrics_history WHERE meter_id = ?", Integer.class, TEST_METER_ID);
         assertTrue(historyCount != null && historyCount == 1, "Metrics history table should have 1 record");
+    } finally {
+        TenantContext.clear();
     }
+}
 }

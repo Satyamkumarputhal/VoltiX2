@@ -12,5 +12,5 @@ public interface AlertDispatchService {
 
     int clearAllAlertsForTenant(Long tenantId);
 
-    SystemAlert acknowledgeAlert(Long alertId, Long tenantId);
+    SystemAlert acknowledgeAlert(Long alertId, Long tenantId, String username);
 }

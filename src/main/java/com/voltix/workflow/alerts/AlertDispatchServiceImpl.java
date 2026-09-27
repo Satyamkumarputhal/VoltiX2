@@ -1,5 +1,8 @@
 package com.voltix.workflow.alerts;
 
+import com.voltix.workflow.incident.IncidentRepository;
+import com.voltix.workflow.incident.IncidentService;
+import com.voltix.workflow.incident.dto.IncidentCreateRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,21 +25,30 @@ public class AlertDispatchServiceImpl implements AlertDispatchService {
     private static final String ALERT_TOPIC = "/topic/alerts";
 
     private final SystemAlertRepository alertRepository;
+    private final IncidentRepository incidentRepository;
     private final JdbcTemplate jdbcTemplate;
     private final SimpMessagingTemplate messagingTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final TransactionTemplate requiresNewTransactionTemplate;
     private final DataSource dataSource;
+    private final IncidentService incidentService;
 
     public AlertDispatchServiceImpl(SystemAlertRepository alertRepository,
+                                    IncidentRepository incidentRepository,
                                     JdbcTemplate jdbcTemplate,
                                     SimpMessagingTemplate messagingTemplate,
                                     PlatformTransactionManager transactionManager,
-                                    DataSource dataSource) {
+                                    DataSource dataSource,
+                                    IncidentService incidentService) {
         this.alertRepository = alertRepository;
+        this.incidentRepository = incidentRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.messagingTemplate = messagingTemplate;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
         this.dataSource = dataSource;
+        this.incidentService = incidentService;
     }
 
     @Override
@@ -146,7 +158,7 @@ public class AlertDispatchServiceImpl implements AlertDispatchService {
 
     @Override
     @Transactional
-    public SystemAlert acknowledgeAlert(Long alertId, Long tenantId) {
+    public SystemAlert acknowledgeAlert(Long alertId, Long tenantId, String username) {
         // Use JdbcTemplate to load the alert, bypassing Hibernate cache
         var alertRow = jdbcTemplate.query(
                 "SELECT alert_id, tenant_id, meter_id, zone_id, alert_type, severity, anomaly_score, priority_score, status, detected_at, assigned_to, resolved_at FROM system_alerts WHERE alert_id = ? AND tenant_id = ?",
@@ -203,6 +215,48 @@ public class AlertDispatchServiceImpl implements AlertDispatchService {
         alert.setResolvedAt(now);
         log.info("Alert acknowledged via JdbcTemplate (bypassing Hibernate): id={}, tenantId={}", alertId, tenantId);
 
+        // Create Incident if one doesn't already exist for this alert
+        try {
+            createIncidentForAlert(alert, tenantId, username);
+        } catch (Exception e) {
+            log.error("Failed to create incident for acknowledged alert {}: {}", alertId, e.getMessage());
+            // Don't rollback alert acknowledgement - incident creation failure shouldn't block alert acknowledgement
+            // Log the error but continue
+        }
+
         return alert;
+    }
+
+    private void createIncidentForAlert(SystemAlert alert, Long tenantId, String username) {
+        // Check if incident already exists for this alert using direct repository lookup
+        if (incidentRepository.findBySourceAlertIdAndTenantId(alert.getAlertId(), tenantId).isPresent()) {
+            log.info("Incident already exists for alert {}, skipping creation", alert.getAlertId());
+            return;
+        }
+
+        // Create incident from the alert data - populate all required fields
+        var request = new com.voltix.workflow.incident.dto.IncidentCreateRequest();
+        request.setSourceAlertId(alert.getAlertId());
+        request.setTitle(alert.getAlertType() + " at " + alert.getMeterId());
+        request.setDescription("Auto-generated incident from acknowledged alert " + alert.getAlertId());
+        request.setMeterId(alert.getMeterId());
+        request.setZoneId(alert.getZoneId());
+        request.setAlertType(alert.getAlertType());
+        request.setSeverity(alert.getSeverity().name());
+
+        // Run incident creation in a separate transaction so that failure doesn't roll back alert acknowledgement
+        requiresNewTransactionTemplate.execute(status -> {
+            try {
+                var incident = incidentService.createIncident(tenantId, username, request);
+                log.info("Created incident {} for acknowledged alert {}", incident.getIncidentId(), alert.getAlertId());
+            } catch (IllegalArgumentException e) {
+                if (e.getMessage().contains("already exists for source alert ID")) {
+                    log.info("Incident already exists for alert {}, skipping creation", alert.getAlertId());
+                } else {
+                    throw e;
+                }
+            }
+            return null;
+        });
     }
 }

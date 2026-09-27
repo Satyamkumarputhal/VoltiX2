@@ -2,10 +2,12 @@ package com.voltix.telemetry.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.voltix.platform.config.VoltixProperties;
+import com.voltix.security.TenantContext;
 import com.voltix.telemetry.dto.TelemetryPacket;
 import com.voltix.telemetry.entity.TelemetryStaging;
 import com.voltix.telemetry.repository.TelemetryStagingRepository;
 import com.voltix.telemetry.worker.TelemetryWorker;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -58,6 +60,9 @@ class TelemetryIngressControllerTest {
 
     @BeforeEach
     void setUp() {
+        // TenantContext must be set for telemetry ingestion (JWT filter sets this in real requests)
+        TenantContext.setCurrentTenant(1L);
+
         validPacket = new TelemetryPacket();
         validPacket.setMeterId("SM-10029");
         validPacket.setVoltage(230.0);
@@ -128,5 +133,10 @@ class TelemetryIngressControllerTest {
                         .content(objectMapper.writeValueAsString(validPacket)))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.message").value("VoltiX ingestion capacity is saturated"));
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
     }
 }
