@@ -100,10 +100,11 @@ class IncidentControllerIntegrationTest {
     }
 
     private void cleanFixtures() {
-        jdbcTemplate.update("DELETE FROM incidents WHERE tenant_id IN (?, ?)", TA_TENANT_ID, TB_TENANT_ID);
-        jdbcTemplate.update("DELETE FROM field_jobs WHERE tenant_id IN (?, ?)", TA_TENANT_ID, TB_TENANT_ID);
-        jdbcTemplate.update("DELETE FROM inspections WHERE tenant_id IN (?, ?)", TA_TENANT_ID, TB_TENANT_ID);
-        jdbcTemplate.update("DELETE FROM system_alerts WHERE tenant_id IN (?, ?)", TA_TENANT_ID, TB_TENANT_ID);
+        // Delete in correct order due to FK constraints: child tables first
+        jdbcTemplate.update("DELETE FROM inspections");
+        jdbcTemplate.update("DELETE FROM field_jobs");
+        jdbcTemplate.update("DELETE FROM incidents");
+        jdbcTemplate.update("DELETE FROM system_alerts");
         jdbcTemplate.update("DELETE FROM smart_meters WHERE meter_id = ?", TA_METER_ID);
         jdbcTemplate.update("DELETE FROM grid_zones WHERE zone_id IN (?, ?)", TA_ZONE_ID, TB_ZONE_ID);
         jdbcTemplate.update("DELETE FROM users WHERE username IN (?, ?, ?, ?)", TA_OPERATOR, TA_ADMIN, TA_INSPECTOR, TB_OPERATOR);

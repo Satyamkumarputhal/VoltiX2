@@ -48,7 +48,9 @@ class MultiTenancySecurityIntegrationTest {
         // Only ever touches this test's own dedicated fixture rows -- never
         // a blanket DELETE affecting other tenants/zones/meters/users.
         jdbcTemplate.update("DELETE FROM public_complaints WHERE tenant_id IN (?, ?)", TEST_TENANT_1_ID, TEST_TENANT_2_ID);
+        jdbcTemplate.update("DELETE FROM smart_meters WHERE zone_id IN (?, ?)", TEST_ZONE_1_ID, TEST_ZONE_2_ID);
         jdbcTemplate.update("DELETE FROM grid_zones WHERE zone_id IN (?, ?)", TEST_ZONE_1_ID, TEST_ZONE_2_ID);
+        jdbcTemplate.update("DELETE FROM users WHERE tenant_id IN (?, ?)", TEST_TENANT_1_ID, TEST_TENANT_2_ID);
         jdbcTemplate.update("DELETE FROM tenants WHERE tenant_id IN (?, ?)", TEST_TENANT_1_ID, TEST_TENANT_2_ID);
 
         // Seed 2 tenants

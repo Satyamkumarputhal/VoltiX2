@@ -92,12 +92,14 @@ class DefaultConfigModelBPromotionTest {
     }
 
     private void cleanFixtures() {
+        jdbcTemplate.update("DELETE FROM incidents WHERE tenant_id = ?",              TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM zone_hourly_aggregates WHERE zone_id = ?", TEST_ZONE_ID);
         jdbcTemplate.update("DELETE FROM system_alerts WHERE zone_id = ?",          TEST_ZONE_ID);
         jdbcTemplate.update("DELETE FROM metrics_history WHERE zone_id = ?",        TEST_ZONE_ID);
         jdbcTemplate.update("DELETE FROM telemetry_staging WHERE zone_id = ?",      TEST_ZONE_ID);
         jdbcTemplate.update("DELETE FROM smart_meters WHERE zone_id = ?",           TEST_ZONE_ID);
         jdbcTemplate.update("DELETE FROM grid_zones WHERE zone_id = ?",             TEST_ZONE_ID);
+        jdbcTemplate.update("DELETE FROM users WHERE tenant_id = ?",                TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM tenants WHERE tenant_id = ?",              TEST_TENANT_ID);
     }
 

@@ -89,10 +89,16 @@ class ForecastControllerTest {
     private void cleanFixtures() {
         jdbcTemplate.update("DELETE FROM zone_hourly_aggregates WHERE zone_id IN (?, ?, ?)",
                 TA_ZONE_A, TA_ZONE_B, TB_ZONE);
+        jdbcTemplate.update("DELETE FROM incidents WHERE tenant_id IN (?, ?)", TA_TENANT_ID, TB_TENANT_ID);
+        jdbcTemplate.update("DELETE FROM system_alerts WHERE zone_id IN (?, ?, ?)",
+                TA_ZONE_A, TA_ZONE_B, TB_ZONE);
+        jdbcTemplate.update("DELETE FROM smart_meters WHERE zone_id IN (?, ?, ?)",
+                TA_ZONE_A, TA_ZONE_B, TB_ZONE);
         jdbcTemplate.update("DELETE FROM grid_zones WHERE zone_id IN (?, ?, ?)",
                 TA_ZONE_A, TA_ZONE_B, TB_ZONE);
         jdbcTemplate.update("DELETE FROM users WHERE username IN (?, ?, ?, ?)",
                 TA_OPERATOR, TA_ADMIN, TA_INSPECTOR, TB_OPERATOR);
+        jdbcTemplate.update("DELETE FROM users WHERE tenant_id IN (?, ?)", TA_TENANT_ID, TB_TENANT_ID);
         jdbcTemplate.update("DELETE FROM tenants WHERE tenant_id IN (?, ?)", TA_TENANT_ID, TB_TENANT_ID);
     }
 
