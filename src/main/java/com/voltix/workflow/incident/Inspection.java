@@ -2,6 +2,8 @@ package com.voltix.workflow.incident;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.ZonedDateTime;
 
 @Entity
@@ -26,7 +28,8 @@ public class Inspection {
     private String finding;
     private String conclusion;
 
-    @Column(columnDefinition = "JSONB")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
     private String evidenceMetadata;
 
     private String recommendation;

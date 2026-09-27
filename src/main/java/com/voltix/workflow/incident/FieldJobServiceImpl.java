@@ -2,6 +2,7 @@ package com.voltix.workflow.incident;
 
 import com.voltix.security.User;
 import com.voltix.security.UserRepository;
+import com.voltix.workflow.incident.InspectionService;
 import com.voltix.workflow.incident.dto.FieldJobAdminUpdateRequest;
 import com.voltix.workflow.incident.dto.FieldJobCreateRequest;
 import com.voltix.workflow.incident.dto.FieldJobResponse;
@@ -23,13 +24,16 @@ public class FieldJobServiceImpl implements FieldJobService {
     private final FieldJobRepository fieldJobRepository;
     private final IncidentRepository incidentRepository;
     private final UserRepository userRepository;
+    private final InspectionService inspectionService;
 
     public FieldJobServiceImpl(FieldJobRepository fieldJobRepository,
                                IncidentRepository incidentRepository,
-                               UserRepository userRepository) {
+                               UserRepository userRepository,
+                               InspectionService inspectionService) {
         this.fieldJobRepository = fieldJobRepository;
         this.incidentRepository = incidentRepository;
         this.userRepository = userRepository;
+        this.inspectionService = inspectionService;
     }
 
     @Override
@@ -164,6 +168,19 @@ public class FieldJobServiceImpl implements FieldJobService {
         FieldJob saved = fieldJobRepository.save(fieldJob);
         log.info("Updated field job status: fieldJobId={}, status={}", saved.getFieldJobId(), saved.getStatus());
 
+        // Auto-create inspection when field job transitions to COMPLETED
+        if (newStatus == FieldJobStatus.COMPLETED) {
+            try {
+                inspectionService.createInspectionForFieldJob(tenantId, saved.getFieldJobId());
+                log.info("Auto-created inspection for completed field job: fieldJobId={}", saved.getFieldJobId());
+            } catch (IllegalStateException e) {
+                // Log but don't fail the field job completion if inspection creation fails
+                log.warn("Could not create inspection for completed field job {}: {}", saved.getFieldJobId(), e.getMessage());
+            } catch (IllegalArgumentException e) {
+                log.warn("Could not create inspection for completed field job {}: {}", saved.getFieldJobId(), e.getMessage());
+            }
+        }
+
         return new FieldJobResponse(saved);
     }
 
@@ -262,6 +279,18 @@ public class FieldJobServiceImpl implements FieldJobService {
 
         FieldJob saved = fieldJobRepository.save(fieldJob);
         log.info("Admin updated field job: fieldJobId={}, status={}", saved.getFieldJobId(), saved.getStatus());
+
+        // Auto-create inspection when field job transitions to COMPLETED (via admin update)
+        if (request.getStatus() != null && request.getStatus() == FieldJobStatus.COMPLETED) {
+            try {
+                inspectionService.createInspectionForFieldJob(tenantId, saved.getFieldJobId());
+                log.info("Auto-created inspection for completed field job (admin): fieldJobId={}", saved.getFieldJobId());
+            } catch (IllegalStateException e) {
+                log.warn("Could not create inspection for completed field job {}: {}", saved.getFieldJobId(), e.getMessage());
+            } catch (IllegalArgumentException e) {
+                log.warn("Could not create inspection for completed field job {}: {}", saved.getFieldJobId(), e.getMessage());
+            }
+        }
 
         return new FieldJobResponse(saved);
     }
