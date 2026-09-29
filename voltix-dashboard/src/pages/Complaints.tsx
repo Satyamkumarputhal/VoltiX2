@@ -18,6 +18,17 @@ interface TriageAction {
   status: 'loading' | 'error';
 }
 
+const COMPLAINT_STATUSES: ComplaintStatus[] = [
+  'PENDING_VERIFICATION',
+  'VERIFIED',
+  'ESCALATED',
+  'REJECTED',
+];
+
+function getStatusLabel(status: ComplaintStatus): string {
+  return status.replace(/_/g, ' ');
+}
+
 function Complaints() {
   const { isAuthenticated } = useAuth();
   const [complaints, setComplaints] = React.useState<PublicComplaint[]>([]);
@@ -25,13 +36,14 @@ function Complaints() {
   const [initialLoad, setInitialLoad] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [triaging, setTriaging] = React.useState<Record<number, TriageAction['status']>>({});
+  const [statusFilter, setStatusFilter] = React.useState<ComplaintStatus>('PENDING_VERIFICATION');
 
   const fetchComplaints = React.useCallback(async () => {
     if (initialLoad) setLoading(true);
     setError(null);
     try {
       const res = await client.get<PublicComplaint[]>('/complaints', {
-        params: { status: 'PENDING_VERIFICATION' },
+        params: { status: statusFilter },
       });
       setComplaints(res.data);
     } catch (err: unknown) {
@@ -41,7 +53,7 @@ function Complaints() {
       setLoading(false);
       setInitialLoad(false);
     }
-  }, [initialLoad]);
+  }, [initialLoad, statusFilter]);
 
   React.useEffect(() => {
     if (!isAuthenticated) {
@@ -61,7 +73,8 @@ function Complaints() {
         await client.patch(`/complaints/${complaintId}/triage`, null, {
           params: { status: newStatus },
         });
-        setComplaints((prev) => prev.filter((c) => c.complaintId !== complaintId));
+        // Refetch from server to ensure UI stays in sync with backend state
+        await fetchComplaints();
       } catch {
         setTriaging((prev) => ({ ...prev, [complaintId]: 'error' }));
         setTimeout(() => setTriaging((prev) => {
@@ -71,17 +84,35 @@ function Complaints() {
         }), 3000);
       }
     },
-    [],
+    [fetchComplaints],
   );
 
-  return (
+return (
     <div className="h-screen bg-grid-base flex flex-col overflow-hidden">
       <header className="h-12 border-b border-grid-border bg-grid-surface flex items-center justify-between px-5 shrink-0">
         <div className="flex items-center gap-3">
           <svg className="w-4 h-4 text-accent-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 000 4h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 002-2h-2M9 5a2 2 0 000 4h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
           </svg>
           <span className="font-semibold text-[15px] text-grid-text">Complaint Triage</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-[12px] text-grid-muted">Status:</span>
+          <div className="flex items-center gap-1 bg-grid-raised rounded p-1">
+            {COMPLAINT_STATUSES.map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`px-2 py-1 text-[11px] font-mono rounded transition-colors ${
+                  statusFilter === s
+                    ? 'bg-accent-amber text-grid-base'
+                    : 'text-grid-muted hover:text-grid-text'
+                }`}
+              >
+                {getStatusLabel(s)}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -124,12 +155,12 @@ function Complaints() {
               </div>
             )}
 
-            {!loading && !error && complaints.length === 0 && (
+{!loading && !error && complaints.length === 0 && (
               <div className="flex flex-col items-center justify-center h-32 gap-2 text-grid-muted">
                 <svg className="w-6 h-6 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 000 4h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 002-2h-2M9 5a2 2 0 000 4h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                 </svg>
-                <p className="text-xs">No complaints pending verification</p>
+                <p className="text-xs">No complaints {getStatusLabel(statusFilter).toLowerCase()}</p>
               </div>
             )}
 

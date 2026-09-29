@@ -117,6 +117,11 @@ public class IncidentServiceImpl implements IncidentService {
                 throw new IllegalArgumentException("Assigned user does not belong to the same tenant");
             }
 
+            // Only users with INSPECTOR role can be assigned to incidents
+            if (!"INSPECTOR".equalsIgnoreCase(assignedUser.getRole())) {
+                throw new IllegalArgumentException("Assigned user must have INSPECTOR role");
+            }
+
             incident.setAssignedTo(assignedToId);
         }
 

@@ -15,6 +15,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 import org.springframework.test.annotation.DirtiesContext;
 
@@ -481,6 +491,54 @@ class InspectionServiceIntegrationTest {
         // Compare instants with millisecond precision to handle nanosecond differences
         assertEquals(firstCompletedAt.toInstant().toEpochMilli(), updated2.getCompletedAt().toInstant().toEpochMilli());
         assertEquals(InspectionResult.FALSE_POSITIVE, updated2.getResult());
+    }
+
+    // 12. concurrent inspection creation race condition (idempotent under race)
+    @Test
+    void testConcurrentInspectionCreationRace() throws InterruptedException {
+        Long fieldJobId = createIncidentAndFieldJob();
+
+        // Complete the field job
+        FieldJobStatusUpdateRequest updateRequest = new FieldJobStatusUpdateRequest();
+        updateRequest.setStatus(FieldJobStatus.EN_ROUTE);
+        fieldJobService.updateFieldJobStatus(fieldJobId, TEST_TENANT_ID, TEST_INSPECTOR, updateRequest);
+        updateRequest.setStatus(FieldJobStatus.ON_SITE);
+        fieldJobService.updateFieldJobStatus(fieldJobId, TEST_TENANT_ID, TEST_INSPECTOR, updateRequest);
+        updateRequest.setStatus(FieldJobStatus.COMPLETED);
+        fieldJobService.updateFieldJobStatus(fieldJobId, TEST_TENANT_ID, TEST_INSPECTOR, updateRequest);
+
+        // Get the inspection created
+        InspectionResponse inspection1 = inspectionService.getInspectionByFieldJobId(fieldJobId, TEST_TENANT_ID);
+        Long inspectionId = inspection1.getInspectionId();
+
+        // Now simulate concurrent calls to createInspectionForFieldJob
+        // by calling it directly multiple times concurrently
+        int threadCount = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        List<Future<InspectionResponse>> futures = new ArrayList<>();
+
+        for (int i = 0; i < threadCount; i++) {
+            futures.add(executor.submit(() -> inspectionService.createInspectionForFieldJob(TEST_TENANT_ID, fieldJobId)));
+        }
+
+        // All should succeed and return the same inspection
+        Set<Long> inspectionIds = new HashSet<>();
+        for (Future<InspectionResponse> future : futures) {
+            try {
+                InspectionResponse result = future.get(5, TimeUnit.SECONDS);
+                assertNotNull(result);
+                assertEquals(fieldJobId, result.getFieldJobId());
+                assertEquals(TEST_TENANT_ID, result.getTenantId());
+                inspectionIds.add(result.getInspectionId());
+            } catch (ExecutionException | TimeoutException e) {
+                throw new AssertionError("Concurrent inspection creation failed", e);
+            }
+        }
+        executor.shutdown();
+
+        // Should only have one unique inspection ID
+        assertEquals(1, inspectionIds.size(), "All concurrent calls should return the same inspection");
+        assertEquals(inspectionId, inspectionIds.iterator().next(), "Should return the originally created inspection");
     }
 
     // 11. missing inspection returns expected not-found behavior

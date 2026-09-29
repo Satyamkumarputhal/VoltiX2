@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
+import java.time.ZonedDateTime;
 import java.util.UUID;
 
 @Component
@@ -58,6 +59,9 @@ public class TelemetryWorker {
             ));
             log.info("[{}] [{}] [{}] Telemetry evaluated via {} with score {}",
                     transactionId, packet.getMeterId(), zoneId, result.source(), result.score());
+
+            // Mark staging record as successfully processed
+            stagingRepository.markProcessed(stagingId, tenantId, ZonedDateTime.now());
         } catch (RuntimeException ex) {
             stagingRepository.markFailed(stagingId, tenantId, ex.getMessage());
             log.error("[{}] [{}] [{}] Telemetry processing failed for staging {}",

@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.ZonedDateTime;
+
 @Repository
 public interface TelemetryStagingRepository extends JpaRepository<TelemetryStaging, Long> {
     @Transactional
@@ -18,4 +20,15 @@ public interface TelemetryStagingRepository extends JpaRepository<TelemetryStagi
                and staging.tenantId = :tenantId
             """)
     void markFailed(Long stagingId, Long tenantId, String failureReason);
+
+    @Transactional
+    @Modifying
+    @Query("""
+            update TelemetryStaging staging
+               set staging.processed = true,
+                   staging.processedAt = :processedAt
+             where staging.stagingId = :stagingId
+               and staging.tenantId = :tenantId
+            """)
+    void markProcessed(Long stagingId, Long tenantId, ZonedDateTime processedAt);
 }

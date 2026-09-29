@@ -216,9 +216,12 @@ class IncidentControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value("ACKNOWLEDGED"))
                 .andExpect(jsonPath("$.acknowledgedAt").exists());
 
-        // ACKNOWLEDGED -> ASSIGNED (assign to the creator)
+        // ACKNOWLEDGED -> ASSIGNED (assign to an INSPECTOR)
+        Long inspectorId = jdbcTemplate.queryForObject(
+                "SELECT user_id FROM users WHERE username = ? AND tenant_id = ?",
+                Long.class, TA_INSPECTOR, TA_TENANT_ID);
         updateRequest.setStatus(IncidentStatus.ASSIGNED);
-        updateRequest.setAssignedTo(created.getCreatedBy());
+        updateRequest.setAssignedTo(inspectorId);
 
         mockMvc.perform(patch("/api/v1/incidents/{id}", created.getIncidentId())
                         .header("Authorization", "Bearer " + token)
@@ -227,7 +230,7 @@ class IncidentControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ASSIGNED"))
                 .andExpect(jsonPath("$.assignedAt").exists())
-                .andExpect(jsonPath("$.assignedTo").value(created.getCreatedBy()));
+                .andExpect(jsonPath("$.assignedTo").value(inspectorId));
     }
 
     // ── Test 5: Invalid status transition rejected ─────────────────────────

@@ -8,6 +8,7 @@ import com.voltix.workflow.incident.dto.InspectionUpdateRequest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -80,10 +81,36 @@ public class InspectionServiceImpl implements InspectionService {
         inspection.setCompletedAt(null);
         inspection.setCreatedAt(ZonedDateTime.now());
 
-        Inspection saved = inspectionRepository.save(inspection);
-        log.info("Created inspection: inspectionId={}, tenantId={}, fieldJobId={}", saved.getInspectionId(), tenantId, fieldJobId);
+        try {
+            Inspection saved = inspectionRepository.save(inspection);
+            log.info("Created inspection: inspectionId={}, tenantId={}, fieldJobId={}", saved.getInspectionId(), tenantId, fieldJobId);
+            return new InspectionResponse(saved);
+        } catch (DataIntegrityViolationException e) {
+            // Check if this is the UNIQUE constraint violation on field_job_id
+            // PostgreSQL constraint name: inspections_field_job_id_key
+            if (isUniqueFieldJobIdConstraintViolation(e)) {
+                log.info("Race condition detected: inspection already created for field job id={}, tenantId={}, fetching existing", fieldJobId, tenantId);
+                Inspection existingInspection = inspectionRepository.findByFieldJobIdAndTenantId(fieldJobId, tenantId)
+                        .orElseThrow(() -> new IllegalStateException("Inspection creation reported unique constraint violation but no inspection found for fieldJobId=" + fieldJobId + " tenantId=" + tenantId));
+                return new InspectionResponse(existingInspection);
+            }
+            // Re-throw other data integrity violations (e.g., FK violations, other constraints)
+            throw e;
+        }
+    }
 
-        return new InspectionResponse(saved);
+    private boolean isUniqueFieldJobIdConstraintViolation(DataIntegrityViolationException e) {
+        Throwable cause = e.getCause();
+        while (cause != null) {
+            String message = cause.getMessage();
+            if (message != null && message.contains("inspections_field_job_id_key")) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        // Fallback: check the exception message itself
+        String message = e.getMessage();
+        return message != null && message.contains("inspections_field_job_id_key");
     }
 
     @Override

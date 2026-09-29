@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.test.annotation.DirtiesContext;
+import com.voltix.security.TenantContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -54,11 +55,15 @@ class AlertDispatchIntegrationTest {
     void setUp() {
         // Only ever touches this test's own dedicated fixture rows -- never
         // a blanket DELETE affecting other tenants/zones/meters/users.
+        // Delete in correct FK order: incidents -> system_alerts -> metrics -> meters -> zones -> users -> tenants
+        jdbcTemplate.update("DELETE FROM incidents WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM system_alerts WHERE meter_id = ?", TEST_METER_ID);
         jdbcTemplate.update("DELETE FROM metrics_history WHERE meter_id = ?", TEST_METER_ID);
         jdbcTemplate.update("DELETE FROM telemetry_staging WHERE meter_id = ?", TEST_METER_ID);
         jdbcTemplate.update("DELETE FROM smart_meters WHERE meter_id = ?", TEST_METER_ID);
         jdbcTemplate.update("DELETE FROM grid_zones WHERE zone_id = ?", TEST_ZONE_ID);
+        // Delete users for this tenant BEFORE deleting the tenant (FK constraint)
+        jdbcTemplate.update("DELETE FROM users WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM tenants WHERE tenant_id = ?", TEST_TENANT_ID);
 
         jdbcTemplate.update("INSERT INTO tenants (tenant_id, tenant_name, status) VALUES (?, ?, 'ACTIVE')",
@@ -67,6 +72,14 @@ class AlertDispatchIntegrationTest {
                 TEST_ZONE_ID, TEST_TENANT_ID, "Alert Test High Risk Zone");
         jdbcTemplate.update("INSERT INTO smart_meters (meter_id, tenant_id, zone_id, serial_number, status) VALUES (?, ?, ?, ?, 'ACTIVE')",
                 TEST_METER_ID, TEST_TENANT_ID, TEST_ZONE_ID, "SN-" + TEST_METER_ID);
+        
+        // Ensure test-operator user exists in this tenant for Incident creation
+        jdbcTemplate.update("DELETE FROM users WHERE username = ? AND tenant_id = ?", "test-operator", TEST_TENANT_ID);
+        jdbcTemplate.update("INSERT INTO users (tenant_id, username, password_hash, role) VALUES (?, ?, ?, ?)",
+                TEST_TENANT_ID, "test-operator", "$2a$12$IfrQOxJ4vlVSWiDELUf1wuJdJRa4ixZcKIP2/hChCKlfAX6zDTZcq", "OPERATOR");
+        
+        // Clear any stale TenantContext
+        TenantContext.clear();
     }
 
     @Test
@@ -191,40 +204,46 @@ class AlertDispatchIntegrationTest {
         // This simulates: Dashboard loads alerts via JPA -> User clicks ACK -> Service uses JdbcTemplate
         Long realTenantId = 1L;
 
-        // Need a valid meter/zone for tenant 1
-        String meterSql = "SELECT meter_id FROM smart_meters WHERE tenant_id = ? AND status = 'ACTIVE' LIMIT 1";
-        List<Map<String, Object>> meters = jdbcTemplate.queryForList(meterSql, realTenantId);
-        if (meters.isEmpty()) {
-            return; // Skip if no meters
+        // Ensure TenantContext is set for this tenant
+        TenantContext.setCurrentTenant(realTenantId);
+        try {
+            // Need a valid meter/zone for tenant 1
+            String meterSql = "SELECT meter_id FROM smart_meters WHERE tenant_id = ? AND status = 'ACTIVE' LIMIT 1";
+            List<Map<String, Object>> meters = jdbcTemplate.queryForList(meterSql, realTenantId);
+            if (meters.isEmpty()) {
+                return; // Skip if no meters
+            }
+            String meterId = (String) meters.get(0).get("meter_id");
+            Long zoneId = ((Number) jdbcTemplate.queryForObject(
+                "SELECT zone_id FROM smart_meters WHERE meter_id = ?", Long.class, meterId)).longValue();
+
+            // 1. Create alert via service (uses JPA internally)
+            SystemAlert created = alertDispatchService.createAlert(realTenantId, meterId, zoneId, "NTL_ANOMALY", 0.85);
+            Long alertId = created.getAlertId();
+            assertNotNull(alertId);
+
+            // 2. Load the alert via JPA repository - this puts it in Hibernate session
+            SystemAlert jpaLoaded = alertRepository.findById(alertId).orElse(null);
+            assertNotNull(jpaLoaded, "JPA should find the alert");
+            assertEquals(AlertStatus.OPEN, jpaLoaded.getStatus());
+
+            // 3. Verify it exists in DB via JdbcTemplate (bypassing Hibernate)
+            String verifySql = "SELECT status FROM system_alerts WHERE alert_id = ? AND tenant_id = ?";
+            String dbStatus = jdbcTemplate.queryForObject(verifySql, String.class, alertId, realTenantId);
+            assertEquals("OPEN", dbStatus, "Pre-condition: alert should be OPEN in DB");
+
+            // 4. Now invoke acknowledgeAlert - uses JdbcTemplate inside @Transactional
+            // This is where the bug reportedly occurs: JdbcTemplate SELECT returns 0 rows
+            // because Hibernate session has a stale/cached view
+            SystemAlert acknowledged = alertDispatchService.acknowledgeAlert(alertId, realTenantId, "test-operator");
+
+            // If the bug exists, this will be null (SELECT returned 0 rows)
+            assertNotNull(acknowledged, "acknowledgeAlert returned null - SELECT returned 0 rows despite row existing in DB (stale Hibernate session scenario) for alertId=" + alertId);
+            assertEquals(AlertStatus.ACKNOWLEDGED, acknowledged.getStatus());
+            assertNotNull(acknowledged.getResolvedAt());
+        } finally {
+            TenantContext.clear();
         }
-        String meterId = (String) meters.get(0).get("meter_id");
-        Long zoneId = ((Number) jdbcTemplate.queryForObject(
-            "SELECT zone_id FROM smart_meters WHERE meter_id = ?", Long.class, meterId)).longValue();
-
-        // 1. Create alert via service (uses JPA internally)
-        SystemAlert created = alertDispatchService.createAlert(realTenantId, meterId, zoneId, "NTL_ANOMALY", 0.85);
-        Long alertId = created.getAlertId();
-        assertNotNull(alertId);
-
-        // 2. Load the alert via JPA repository - this puts it in Hibernate session
-        SystemAlert jpaLoaded = alertRepository.findById(alertId).orElse(null);
-        assertNotNull(jpaLoaded, "JPA should find the alert");
-        assertEquals(AlertStatus.OPEN, jpaLoaded.getStatus());
-
-        // 3. Verify it exists in DB via JdbcTemplate (bypassing Hibernate)
-        String verifySql = "SELECT status FROM system_alerts WHERE alert_id = ? AND tenant_id = ?";
-        String dbStatus = jdbcTemplate.queryForObject(verifySql, String.class, alertId, realTenantId);
-        assertEquals("OPEN", dbStatus, "Pre-condition: alert should be OPEN in DB");
-
-        // 4. Now invoke acknowledgeAlert - uses JdbcTemplate inside @Transactional
-        // This is where the bug reportedly occurs: JdbcTemplate SELECT returns 0 rows
-        // because Hibernate session has a stale/cached view
-        SystemAlert acknowledged = alertDispatchService.acknowledgeAlert(alertId, realTenantId, "test-operator");
-
-        // If the bug exists, this will be null (SELECT returned 0 rows)
-        assertNotNull(acknowledged, "acknowledgeAlert returned null - SELECT returned 0 rows despite row existing in DB (stale Hibernate session scenario) for alertId=" + alertId);
-        assertEquals(AlertStatus.ACKNOWLEDGED, acknowledged.getStatus());
-        assertNotNull(acknowledged.getResolvedAt());
     }
 
     // =========================================================================
@@ -248,6 +267,9 @@ class AlertDispatchIntegrationTest {
 
     @BeforeEach
     void setUpBridge() {
+        // Clear any stale TenantContext first
+        TenantContext.clear();
+        
         // Clean up bridge test fixtures - order matters due to FK constraints
         // 1. First delete incidents that reference the users we'll delete (by joining users table)
         jdbcTemplate.update("DELETE FROM incidents WHERE created_by IN (SELECT user_id FROM users WHERE username IN ('bridge-operator-999005', 'cross-operator-999006', 'bridge-test-operator', 'cross-test-operator'))");
@@ -328,33 +350,33 @@ class AlertDispatchIntegrationTest {
         // 2. ACK the alert
         SystemAlert acknowledged = alertDispatchService.acknowledgeAlert(created.getAlertId(), BRIDGE_TENANT_ID, "bridge-test-operator");
 
-        // 2. Verify alert status = ACKNOWLEDGED.
+        // 3. Verify alert status = ACKNOWLEDGED.
         assertEquals(AlertStatus.ACKNOWLEDGED, acknowledged.getStatus());
         assertNotNull(acknowledged.getResolvedAt());
 
-        // 3. Verify exactly one Incident exists.
-        java.util.Optional<Incident> incidents = incidentRepository.findBySourceAlertIdAndTenantId(created.getAlertId(), BRIDGE_TENANT_ID);
-        assertTrue(incidents.isPresent(), "Incident should exist after ACK");
+        // 4. Verify exactly one Incident exists using JdbcTemplate (bypasses JPA transaction snapshot)
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT incident_id, source_alert_id, tenant_id, created_by, meter_id, zone_id, alert_type, severity " +
+                "FROM incidents WHERE source_alert_id = ? AND tenant_id = ?",
+                created.getAlertId(), BRIDGE_TENANT_ID);
+        assertEquals(1, rows.size(), "Exactly one Incident should exist after ACK");
 
-        Incident incident = incidents.get();
+        Map<String, Object> incident = rows.get(0);
 
         // Verify incident.sourceAlertId = alert ID.
-        assertEquals(created.getAlertId(), incident.getSourceAlertId());
+        assertEquals(created.getAlertId(), incident.get("source_alert_id"));
 
         // Verify incident.tenantId = alert tenant.
-        assertEquals(BRIDGE_TENANT_ID, incident.getTenantId());
+        assertEquals(BRIDGE_TENANT_ID, incident.get("tenant_id"));
 
-        // Verify incident.createdBy = authenticated user's ID.
-        assertNotNull(incident.getCreatedBy());
+        // Verify incident.createdBy = authenticated user's ID (non-null).
+        assertNotNull(incident.get("created_by"));
 
         // Verify incident meterId, zoneId, alertType and severity match the alert.
-        assertEquals(created.getMeterId(), incident.getMeterId());
-        assertEquals(created.getZoneId(), incident.getZoneId());
-        assertEquals(created.getAlertType(), incident.getAlertType());
-        assertEquals(created.getSeverity().name(), incident.getSeverity());
-
-        // Verify incident tenant matches alert tenant.
-        assertEquals(BRIDGE_TENANT_ID, incident.getTenantId());
+        assertEquals(created.getMeterId(), incident.get("meter_id"));
+        assertEquals(created.getZoneId(), incident.get("zone_id"));
+        assertEquals(created.getAlertType(), incident.get("alert_type"));
+        assertEquals(created.getSeverity().name(), incident.get("severity"));
     }
 
     @Test
@@ -370,9 +392,11 @@ class AlertDispatchIntegrationTest {
         // 2. Attempt ACK again / exercise the actual existing behavior.
         alertDispatchService.acknowledgeAlert(created.getAlertId(), BRIDGE_TENANT_ID, "bridge-test-operator");
 
-        // 3. Verify incident count for that sourceAlertId remains exactly 1.
-        java.util.Optional<Incident> incidents = incidentRepository.findBySourceAlertIdAndTenantId(created.getAlertId(), BRIDGE_TENANT_ID);
-        assertTrue(incidents.isPresent());
+        // 3. Verify incident count for that sourceAlertId remains exactly 1 (using JdbcTemplate).
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT incident_id FROM incidents WHERE source_alert_id = ? AND tenant_id = ?",
+                created.getAlertId(), BRIDGE_TENANT_ID);
+        assertEquals(1, rows.size(), "Repeated ACK should not create duplicate Incident");
 
         // Verify no duplicate was created (no exception thrown, only one incident exists)
         // The duplicate check in IncidentService will prevent duplicate creation
@@ -425,4 +449,119 @@ class AlertDispatchIntegrationTest {
         assertEquals(AlertStatus.ACKNOWLEDGED, acknowledged.getStatus());
         assertNotNull(acknowledged.getResolvedAt());
     }
+    @Test
+    void testClearAllAlerts_ClearsOnlyOpenAlerts() {
+        // Ensure TenantContext is set for this test tenant
+        TenantContext.setCurrentTenant(TEST_TENANT_ID);
+        try {
+            // Create alerts with different statuses for the test tenant
+            // 1. Create OPEN alerts (should be cleared)
+            SystemAlert openAlert1 = alertDispatchService.createAlert(TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID, "NTL_ANOMALY", 0.85);
+            SystemAlert openAlert2 = alertDispatchService.createAlert(TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID, "NTL_ANOMALY", 0.9);
+        
+        // Create alerts with other statuses by directly inserting into DB
+        // ACKNOWLEDGED
+        Long ackAlertId = jdbcTemplate.queryForObject("""
+                INSERT INTO system_alerts (tenant_id, meter_id, zone_id, alert_type, severity, anomaly_score, priority_score, status, detected_at)
+                VALUES (?, ?, ?, 'NTL_ANOMALY', 'HIGH', 0.75, 2.5, 'ACKNOWLEDGED', NOW())
+                RETURNING alert_id
+                """, Long.class, TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID);
+        
+        // ASSIGNED
+        Long assignedAlertId = jdbcTemplate.queryForObject("""
+                INSERT INTO system_alerts (tenant_id, meter_id, zone_id, alert_type, severity, anomaly_score, priority_score, status, detected_at)
+                VALUES (?, ?, ?, 'NTL_ANOMALY', 'MEDIUM', 0.6, 1.5, 'ASSIGNED', NOW())
+                RETURNING alert_id
+                """, Long.class, TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID);
+        
+        // IN_PROGRESS
+        Long inProgressAlertId = jdbcTemplate.queryForObject("""
+                INSERT INTO system_alerts (tenant_id, meter_id, zone_id, alert_type, severity, anomaly_score, priority_score, status, detected_at)
+                VALUES (?, ?, ?, 'NTL_ANOMALY', 'LOW', 0.4, 1.0, 'IN_PROGRESS', NOW())
+                RETURNING alert_id
+                """, Long.class, TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID);
+        
+        // RESOLVED
+        Long resolvedAlertId = jdbcTemplate.queryForObject("""
+                INSERT INTO system_alerts (tenant_id, meter_id, zone_id, alert_type, severity, anomaly_score, priority_score, status, detected_at, resolved_at)
+                VALUES (?, ?, ?, 'NTL_ANOMALY', 'LOW', 0.3, 0.5, 'RESOLVED', NOW(), NOW())
+                RETURNING alert_id
+                """, Long.class, TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID);
+        
+        // DISMISSED
+        Long dismissedAlertId = jdbcTemplate.queryForObject("""
+                INSERT INTO system_alerts (tenant_id, meter_id, zone_id, alert_type, severity, anomaly_score, priority_score, status, detected_at)
+                VALUES (?, ?, ?, 'NTL_ANOMALY', 'LOW', 0.2, 0.3, 'DISMISSED', NOW())
+                RETURNING alert_id
+                """, Long.class, TEST_TENANT_ID, TEST_METER_ID, TEST_ZONE_ID);
+        
+        
+        // Track the IDs of the OPEN alerts we created
+        Long openAlert1Id = openAlert1.getAlertId();
+        Long openAlert2Id = openAlert2.getAlertId();
+        
+        // Verify initial state
+        List<SystemAlert> beforeClear = alertRepository.findByTenantId(TEST_TENANT_ID);
+        long openCountBefore = beforeClear.stream().filter(a -> a.getStatus() == AlertStatus.OPEN).count();
+        long ackCountBefore = beforeClear.stream().filter(a -> a.getStatus() == AlertStatus.ACKNOWLEDGED).count();
+        long assignedCountBefore = beforeClear.stream().filter(a -> a.getStatus() == AlertStatus.ASSIGNED).count();
+        long inProgressCountBefore = beforeClear.stream().filter(a -> a.getStatus() == AlertStatus.IN_PROGRESS).count();
+        long resolvedCountBefore = beforeClear.stream().filter(a -> a.getStatus() == AlertStatus.RESOLVED).count();
+        long dismissedCountBefore = beforeClear.stream().filter(a -> a.getStatus() == AlertStatus.DISMISSED).count();
+        
+        assertEquals(2, openCountBefore, "Should have 2 OPEN alerts from service");
+        assertEquals(1, ackCountBefore, "Should have 1 ACKNOWLEDGED alert");
+        assertEquals(1, assignedCountBefore, "Should have 1 ASSIGNED alert");
+        assertEquals(1, inProgressCountBefore, "Should have 1 IN_PROGRESS alert");
+        assertEquals(1, resolvedCountBefore, "Should have 1 RESOLVED alert");
+        assertEquals(1, dismissedCountBefore, "Should have 1 DISMISSED alert");
+        
+        // Call clearAllAlertsForTenant
+        int cleared = alertDispatchService.clearAllAlertsForTenant(TEST_TENANT_ID);
+        
+        // Verify result
+        assertEquals(2, cleared, "Should have cleared 2 OPEN alerts");
+        
+        // Verify results
+        List<SystemAlert> afterClear = alertRepository.findByTenantId(TEST_TENANT_ID);
+        
+        // OPEN alerts should now be ACKNOWLEDGED
+        long openCountAfter = afterClear.stream().filter(a -> a.getStatus() == AlertStatus.OPEN).count();
+        long ackCountAfter = afterClear.stream().filter(a -> a.getStatus() == AlertStatus.ACKNOWLEDGED).count();
+        long assignedCountAfter = afterClear.stream().filter(a -> a.getStatus() == AlertStatus.ASSIGNED).count();
+        long inProgressCountAfter = afterClear.stream().filter(a -> a.getStatus() == AlertStatus.IN_PROGRESS).count();
+        long resolvedCountAfter = afterClear.stream().filter(a -> a.getStatus() == AlertStatus.RESOLVED).count();
+        long dismissedCountAfter = afterClear.stream().filter(a -> a.getStatus() == AlertStatus.DISMISSED).count();
+        
+        // OPEN alerts should be gone (converted to ACKNOWLEDGED)
+        assertEquals(0, openCountAfter, "No OPEN alerts should remain");
+        assertEquals(ackCountBefore + 2, ackCountAfter, "OPEN alerts should become ACKNOWLEDGED");
+        
+        // Other statuses should remain unchanged
+        assertEquals(assignedCountBefore, assignedCountAfter, "ASSIGNED alerts should be unchanged");
+        assertEquals(inProgressCountBefore, inProgressCountAfter, "IN_PROGRESS should be unchanged");
+        assertEquals(resolvedCountBefore, resolvedCountAfter, "RESOLVED should be unchanged");
+        assertEquals(dismissedCountBefore, dismissedCountAfter, "DISMISSED should be unchanged");
+        
+        // Verify resolved_at is populated for the two originally OPEN alerts (now ACKNOWLEDGED)
+        // Find the specific alerts by their IDs
+        SystemAlert convertedAlert1 = afterClear.stream()
+                .filter(a -> a.getAlertId().equals(openAlert1Id))
+                .findFirst()
+                .orElse(null);
+        SystemAlert convertedAlert2 = afterClear.stream()
+                .filter(a -> a.getAlertId().equals(openAlert2Id))
+                .findFirst()
+                .orElse(null);
+        
+        assertNotNull(convertedAlert1, "First OPEN alert should be found after clear");
+        assertNotNull(convertedAlert2, "Second OPEN alert should be found after clear");
+        assertEquals(AlertStatus.ACKNOWLEDGED, convertedAlert1.getStatus(), "First alert should be ACKNOWLEDGED");
+        assertEquals(AlertStatus.ACKNOWLEDGED, convertedAlert2.getStatus(), "Second alert should be ACKNOWLEDGED");
+        assertNotNull(convertedAlert1.getResolvedAt(), "Converted alert 1 should have resolved_at");
+        assertNotNull(convertedAlert2.getResolvedAt(), "Converted alert 2 should have resolved_at");
+    } finally {
+        TenantContext.clear();
+    }
+}
 }
